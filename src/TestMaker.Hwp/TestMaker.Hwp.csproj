@@ -9,4 +9,9 @@
     <ProjectReference Include="..\TestMaker.Core\TestMaker.Core.csproj" />
   </ItemGroup>
 
+  <!-- 내장 기본 양식(forms/default)을 프로그램 옆에 함께 둔다. 다시 만들기: testmaker build-default-form forms/default -->
+  <ItemGroup>
+    <None Include="..\..\forms\**\*" Link="forms\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

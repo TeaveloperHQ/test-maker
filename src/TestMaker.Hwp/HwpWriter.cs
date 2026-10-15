@@ -40,6 +40,15 @@ public sealed class HwpWriter(HwpSession session)
         hwp.HAction.Execute("InsertText", p.HSet);
     }
 
+    /// <summary>현재 문단에 문단 스타일을 적용한다. id = header.xml의 스타일 id.</summary>
+    public void Style(int id)
+    {
+        var p = hwp.HParameterSet.HStyle;
+        hwp.HAction.GetDefault("Style", p.HSet);
+        p.Apply = id;
+        hwp.HAction.Execute("Style", p.HSet);
+    }
+
     /// <summary>이후 입력할 글자의 모양.</summary>
     public void CharShape(TextStyle s)
     {

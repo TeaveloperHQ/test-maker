@@ -169,16 +169,19 @@ public sealed class FormAssembler
     }
 
     /// <summary>
-    /// 줄 수가 적은 배치부터, 가장 긴 선택지가 칸(단 폭 / 줄당 개수)에 들어가는 것을 고른다.
-    /// 안 맞거나 선택지 수가 견본과 다르면 5행(자동번호).
+    /// 줄 수가 적은 배치부터, 가장 긴 선택지("① " 포함)와 칸 사이 여유 한 글자가 칸에 들어가는 것을 고른다.
+    /// 칸 = (단 폭 − 선택지 문단 왼쪽 여백) / 줄당 개수. 안 맞거나 선택지 수가 견본과 다르면 5행(자동번호).
     /// </summary>
     ChoiceLayout ChooseLayout(IReadOnlyList<string> choices)
     {
         var auto = form.ChoiceLayouts.FirstOrDefault(l => l.Auto) ?? form.ChoiceLayouts.Last();
-        double emMm = SizePt(form.ChoiceLayouts.First().Style.CharPr) * 0.3528;
-        double longest = choices.Max(c => InlineMarkup.EstimateWidthEm(c) + 1.5) * emMm;
         foreach (var l in form.ChoiceLayouts.Where(l => !l.Auto && l.Count == choices.Count).OrderBy(l => l.Lines))
-            if (longest <= form.ColumnWidthMm / l.MaxPerLine * 0.85) return l;
+        {
+            double emMm = SizePt(l.Style.CharPr) * 0.3528;
+            double needed = (choices.Max(c => InlineMarkup.EstimateWidthEm(c)) + 1.5 + 1) * emMm;
+            double slot = (form.ColumnWidthMm - LeftMarginMm(l.Style.ParaPr)) / l.MaxPerLine;
+            if (needed <= slot) return l;
+        }
         if (auto.Auto) return auto;
         // 자동번호 스타일이 없는 양식: 한 줄에 하나씩 직접 입력
         return new ChoiceLayout { Lines = choices.Count, PerLine = [.. choices.Select(_ => 1)], Style = auto.Style };
@@ -263,6 +266,17 @@ public sealed class FormAssembler
             runs.Add(Run(cp, pieces));
         }
         return runs.Count > 0 ? runs : [EmptyRun(charPr)];
+    }
+
+    /// <summary>문단 모양의 왼쪽 여백(mm). &lt;hp:case&gt;가 실제 HWPUNIT, 없으면 &lt;hp:default&gt;의 절반.</summary>
+    double LeftMarginMm(int paraPr)
+    {
+        var p = header.ParaPr(paraPr);
+        if (p is null) return 0;
+        var caseLeft = p.Descendants(Hh + "margin").FirstOrDefault(m => m.Parent?.Name.LocalName == "case")?.Element(Hc + "left");
+        var anyLeft = p.Descendants(Hc + "left").FirstOrDefault();
+        double hu = caseLeft is not null ? Attr(caseLeft, "value") : (anyLeft is not null ? Attr(anyLeft, "value") / 2.0 : 0);
+        return Templates.HwpUnit.ToMm(hu);
     }
 
     double SizePt(int charPr) => (header.CharPr(charPr) is { } c ? Attr(c, "height", 1000) : 1000) / 100.0;

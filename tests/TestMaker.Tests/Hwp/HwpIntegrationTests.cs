@@ -1,7 +1,6 @@
-using System.Xml.Linq;
+﻿using System.Xml.Linq;
 using TestMaker.Core.Forms;
 using TestMaker.Core.Models;
-using TestMaker.Core.Templates;
 using TestMaker.Hwp;
 
 namespace TestMaker.Tests.Hwp;
@@ -17,19 +16,22 @@ public sealed class HwpIntegrationTests : IDisposable
         try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
     }
 
+    /// <summary>내장 기본 양식: 번호·ㄱ.ㄴ.ㄷ.은 스타일(개요 번호)이 붙이므로 본문 글자에는 없다.</summary>
     [HwpFact]
-    public void Default_template_renders_all_questions()
+    public void Default_form_renders_all_questions_with_styles()
     {
         var exam = SampleExam.Create();
         var output = Path.Combine(dir, "exam.hwpx");
-        using (var session = new HwpSession())
-        {
-            new ExamRenderer(session).Render(exam, ExamTemplate.Default(), null, null);
-            session.SaveAs(output, HwpFormat.Hwpx);
-        }
+        var files = FormRendering.Render(exam, FormRendering.DefaultFormDir, null, output, original: false, pdf: false);
+        Assert.Single(files);
+
         var text = AllText(output);
-        Assert.Contains("1. 다음 중 물질의 상태 변화", text);
-        Assert.Contains("ㄱ. 기체의 압력은", text);
+        Assert.Contains(exam.Info.Title, text);              // 머리 부분 {{제목}}
+        Assert.Contains("다음 중 물질의 상태 변화", text);
+        Assert.DoesNotContain("1. 다음 중", text);          // 번호는 스타일이 붙임
+        Assert.Contains("기체의 압력은", text);
+        Assert.DoesNotContain("ㄱ. 기체의 압력은", text);   // <보기> ㄱ.도 스타일이 붙임
+        Assert.DoesNotContain("#EQ", text);
         Assert.Equal(8, Equations(output).Count);
     }
 

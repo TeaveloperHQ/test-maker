@@ -100,7 +100,11 @@ public static class FormLearner
         if (form.Stem.AutoNumber)
             form.StemContinuation.ParaPr = info.AlignUnder(form.StemContinuation.ParaPr, form.Stem.ParaPr);
         form.GroupHeader = Pick(Role.GroupHeader, primary, extras, info) is { } gh ? Plain(gh) : Bold(Plain(form.Stem), info);
-        form.Figure = Pick(Role.Figure, primary, extras, info) is { } fig ? Plain(fig) : Plain(form.Stem, align: "CENTER");
+        // 그림: 실제로 쓰인 모양 → 양식에 "그림" 스타일이 있으면 그것 → 발문 모양을 가운데 정렬로.
+        form.Figure = Pick(Role.Figure, primary, extras, info) is { } fig ? Plain(fig)
+            : info.StyleByName("그림") is { } figStyle && !info.HeadingOf(Attr(figStyle, "paraPrIDRef")).IsNumbered
+                ? new RoleStyle { StyleName = "그림", StyleId = Attr(figStyle, "id"), ParaPr = Attr(figStyle, "paraPrIDRef"), CharPr = Attr(figStyle, "charPrIDRef") }
+                : Plain(form.Stem, align: "CENTER");
         form.Spacer = Plain(Pick(Role.Spacer, primary, extras, info) ?? form.Stem);
 
         // 문항 사이 빈 줄: 실제 시험지가 있으면 그쪽(양식은 빈칸이 과장되어 있다).

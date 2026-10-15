@@ -73,16 +73,25 @@ dotnet run --project src/TestMaker.Cli -- render 기말고사.json -t forms/우�
 | `**않는**` / `__㉠__` | 굵게 / 밑줄 |
 | 줄바꿈 `\n` | 같은 문단 안 줄 나눔 |
 
+## 기본 양식 (`-t` 없이 출력할 때)
+
+학교 양식이 없으면 내장 **표준 양식**(`forms/default`)을 씁니다. 학교 양식과 똑같은 방식으로 만들어져 있어서
+스타일(문항, 이어지는 발문, 선택지 자동번호, 선택지 1행/2행/3행, 보기, 자료, 그림, 묶음 문항)과
+개요 번호(1. → ① → ㄱ.)가 갖춰져 있고, 출력한 뒤 스타일만 고치면 전체가 바뀝니다.
+
+표준 양식을 고쳐 다시 만들려면(한글 필요): `testmaker build-default-form forms/default`
+
 ## 아직 안 되는 것 / 다음 할 일
-- `-t` 없이 쓰는 **기본 양식**은 아직 예전 방식(직접 서식)입니다 → 스타일이 갖춰진 내장 양식으로 바꿀 예정
 - 한글에서 그린 그림(그리기 개체) 붙여 넣기, 서술형·논술형 칸 양식, 한 단 2문항 균등 배치
+- 정답·해설지는 아직 직접 서식(표준 표)으로 그림
 
 ## 구조
 
 | 프로젝트 | 하는 일 | 한글 필요 |
 |---|---|---|
 | `src/TestMaker.Core` | 문항 모델·검사·JSON, **양식 학습(Forms/FormLearner)·조립(Forms/FormAssembler)** — HWPX XML | 아니요 |
-| `src/TestMaker.Hwp` | 한글 자동화: 변환, 수식·그림 넣기, 저장(FormRendering), 기본 양식·정답지 그리기 | 예 |
+| `src/TestMaker.Hwp` | 한글 자동화: 변환, 수식·그림 넣기, 저장(FormRendering), 표준 양식 생성, 정답지 | 예 |
+| `forms/default` | 내장 표준 양식(학습 결과물) | — |
 | `src/TestMaker.Cli` | 명령줄 `testmaker` | 예 |
 | `tests/TestMaker.Tests` | 단위 + 한글 통합 테스트 | 일부 |
 

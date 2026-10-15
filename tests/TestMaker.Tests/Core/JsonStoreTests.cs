@@ -1,6 +1,6 @@
-﻿using TestMaker.Core.Models;
+﻿using TestMaker.Core.Forms;
+using TestMaker.Core.Models;
 using TestMaker.Core.Serialization;
-using TestMaker.Core.Templates;
 
 namespace TestMaker.Tests.Core;
 
@@ -28,19 +28,35 @@ public sealed class JsonStoreTests : IDisposable
     }
 
     [Fact]
-    public void Template_round_trips_through_folder_load()
+    public void Form_round_trips_and_keeps_choice_separators()
     {
-        var t = ExamTemplate.Default();
-        t.Name = "우리학교";
-        t.NumberFormat = "{0}) ";
-        t.Choice.SizePt = 9.5;
-        JsonStore.Save(Path.Combine(dir, ExamTemplate.FileName), t);
+        var f = new ExamForm
+        {
+            Name = "우리학교",
+            NumberFormat = "{0}) ",
+            ChoiceLayouts = [new ChoiceLayout { Lines = 2, PerLine = [3, 2], Separators = [["\t\t", "\t"], ["\t"]] }],
+        };
+        var path = Path.Combine(dir, ExamForm.FileName);
+        JsonStore.Save(path, f);
 
-        var back = ExamTemplate.Load(dir, out var templateDir);
-        Assert.Equal(Path.GetFullPath(dir), templateDir);
+        var back = JsonStore.Load<ExamForm>(path);
         Assert.Equal("우리학교", back.Name);
         Assert.Equal("{0}) ", back.NumberFormat);
-        Assert.Equal(9.5, back.Choice.SizePt);
+        Assert.Equal(["\t\t", "\t"], back.ChoiceLayouts[0].Separators[0]);
+    }
+
+    /// <summary>저장소의 내장 기본 양식(forms/default)이 프로그램 옆에 복사되고, 기대한 구조를 가진다.</summary>
+    [Fact]
+    public void Built_in_default_form_is_shipped_and_structured()
+    {
+        var formDir = Path.Combine(AppContext.BaseDirectory, "forms", "default");
+        var f = JsonStore.Load<ExamForm>(Path.Combine(formDir, ExamForm.FileName));
+        Assert.True(File.Exists(Path.Combine(formDir, ExamForm.BaseFile)));
+        Assert.Equal(FormKind.Structured, f.Kind);
+        Assert.Equal([1, 2, 3, 5], f.ChoiceLayouts.Select(l => l.Lines));
+        Assert.True(f.ChoiceLayouts.Single(l => l.Lines == 5).Auto);
+        Assert.True(f.ViewBox?.AutoLabels);
+        Assert.NotNull(f.PassageBox);
     }
 
     [Fact]

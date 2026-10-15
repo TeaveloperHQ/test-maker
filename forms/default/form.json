@@ -1,0 +1,168 @@
+{
+  "name": "기본",
+  "learnedFrom": [
+    "내장 표준 양식"
+  ],
+  "learnedAt": "2026-10-15T15:17:36.1326845+09:00",
+  "kind": "Structured",
+  "columnWidthMm": 86,
+  "stem": {
+    "styleName": "문항",
+    "styleId": 23,
+    "paraPr": 20,
+    "charPr": 0,
+    "autoNumber": true
+  },
+  "numberFormat": "{0}. ",
+  "stemContinuation": {
+    "styleName": "이어지는 발문",
+    "styleId": 24,
+    "paraPr": 31,
+    "charPr": 0,
+    "autoNumber": false
+  },
+  "groupHeader": {
+    "styleName": "묶음 문항",
+    "styleId": 33,
+    "paraPr": 0,
+    "charPr": 7,
+    "autoNumber": false
+  },
+  "figure": {
+    "styleName": "그림",
+    "styleId": 32,
+    "paraPr": 26,
+    "charPr": 0,
+    "autoNumber": false
+  },
+  "spacer": {
+    "styleName": "이어지는 발문",
+    "styleId": 24,
+    "paraPr": 1,
+    "charPr": 0,
+    "autoNumber": false
+  },
+  "spacerLines": 2,
+  "pointsFormat": "[{0}점]",
+  "choiceLayouts": [
+    {
+      "lines": 1,
+      "perLine": [
+        5
+      ],
+      "style": {
+        "styleName": "선택지 1행(5칸)",
+        "styleId": 26,
+        "paraPr": 22,
+        "charPr": 0,
+        "autoNumber": false
+      },
+      "auto": false,
+      "separators": [
+        [
+          "\t",
+          "\t",
+          "\t",
+          "\t"
+        ]
+      ],
+      "count": 5,
+      "maxPerLine": 5
+    },
+    {
+      "lines": 2,
+      "perLine": [
+        3,
+        2
+      ],
+      "style": {
+        "styleName": "선택지 2행(3칸)",
+        "styleId": 27,
+        "paraPr": 23,
+        "charPr": 0,
+        "autoNumber": false
+      },
+      "auto": false,
+      "separators": [
+        [
+          "\t",
+          "\t"
+        ],
+        [
+          "\t"
+        ]
+      ],
+      "count": 5,
+      "maxPerLine": 3
+    },
+    {
+      "lines": 3,
+      "perLine": [
+        2,
+        2,
+        1
+      ],
+      "style": {
+        "styleName": "선택지 3행(2칸)",
+        "styleId": 28,
+        "paraPr": 24,
+        "charPr": 0,
+        "autoNumber": false
+      },
+      "auto": false,
+      "separators": [
+        [
+          "\t"
+        ],
+        [
+          "\t"
+        ],
+        []
+      ],
+      "count": 5,
+      "maxPerLine": 2
+    },
+    {
+      "lines": 5,
+      "perLine": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "style": {
+        "styleName": "선택지 자동번호",
+        "styleId": 25,
+        "paraPr": 21,
+        "charPr": 0,
+        "autoNumber": true
+      },
+      "auto": true,
+      "separators": [],
+      "count": 5,
+      "maxPerLine": 1
+    }
+  ],
+  "viewBox": {
+    "line": {
+      "styleName": "보기",
+      "styleId": 29,
+      "paraPr": 25,
+      "charPr": 0,
+      "autoNumber": true
+    },
+    "autoLabels": true
+  },
+  "passageBox": {
+    "line": {
+      "styleName": "자료",
+      "styleId": 31,
+      "paraPr": 27,
+      "charPr": 0,
+      "autoNumber": false
+    },
+    "autoLabels": false
+  },
+  "notes": []
+}

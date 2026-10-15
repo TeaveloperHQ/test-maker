@@ -22,12 +22,15 @@ const string Usage = """
           --also로 준 실제 시험지에서 문항 간격 같은 실제 사용 방식을 배운다. 원본 파일은 바꾸지 않는다.
 
       render <시험.json> [-t 양식폴더] [-o 출력.hwp|.hwpx] [--pdf] [--student-only] [--answers] [--show]
-          시험지를 만든다. 학습한 양식이면 학생용과 원안지(정답 형광펜)를 함께 만든다.
-          -t가 없으면 기본 양식.
+          시험지를 만든다. 학생용과 원안지(정답 형광펜)를 함께 만든다.
+          -t가 없으면 내장 기본 양식(forms/default).
           --pdf           같은 이름의 PDF도 저장
           --student-only  원안지는 만들지 않음
           --answers       정답 및 해설 파일(…_정답.hwp)도 저장
           --show          한글 창을 보이게 (확인용)
+
+      build-default-form <폴더>
+          (개발용) 내장 기본 양식을 한글로 다시 만든다. 저장소의 forms/default를 갱신할 때 쓴다.
     """;
 
 try
@@ -38,6 +41,7 @@ try
         ["check", var path] => Check(path),
         ["render", var path, .. var rest] => Render(path, rest),
         ["learn", var src, var dir, .. var rest] => Learn(src, dir, rest),
+        ["build-default-form", var dir] => BuildDefaultForm(dir),
         _ => Help(),
     };
 }
@@ -82,23 +86,15 @@ static int Render(string path, string[] rest)
 
     var output = Path.GetFullPath(opts.Value("-o") ?? Path.ChangeExtension(path, ".hwp"));
     var examDir = Path.GetDirectoryName(Path.GetFullPath(path));
-    var t = opts.Value("-t");
+    var formDir = opts.Value("-t") ?? FormRendering.DefaultFormDir;
+    if (!FormRendering.IsFormDir(formDir))
+    {
+        Console.Error.WriteLine($"양식 폴더가 아닙니다(form.json 없음): {formDir}  — learn으로 학교 양식을 먼저 학습하세요.");
+        return 1;
+    }
 
-    if (t is not null && FormRendering.IsFormDir(t))
-    {
-        var files = FormRendering.Render(exam, t, examDir, output, original: !opts.Has("--student-only"), pdf: opts.Has("--pdf"), visible: opts.Has("--show"));
-        foreach (var f in files) Console.WriteLine($"{f.Path} ({f.Pages}쪽)");
-    }
-    else
-    {
-        string? templateDir = null;
-        var template = t is not null ? ExamTemplate.Load(t, out templateDir) : ExamTemplate.Default();
-        using var session = new HwpSession(visible: opts.Has("--show"));
-        new ExamRenderer(session).Render(exam, template, templateDir, examDir);
-        session.SaveAs(output, HwpSession.FormatOf(output));
-        Console.WriteLine($"{output} ({session.PageCount}쪽)");
-        if (opts.Has("--pdf")) session.SaveAs(Path.ChangeExtension(output, ".pdf"), HwpFormat.Pdf);
-    }
+    var files = FormRendering.Render(exam, formDir, examDir, output, original: !opts.Has("--student-only"), pdf: opts.Has("--pdf"), visible: opts.Has("--show"));
+    foreach (var f in files) Console.WriteLine($"{f.Path} ({f.Pages}쪽)");
 
     if (opts.Has("--answers"))
     {
@@ -109,6 +105,15 @@ static int Render(string path, string[] rest)
         Console.WriteLine($"정답지: {answers}");
         if (opts.Has("--pdf")) session.SaveAs(Path.ChangeExtension(answers, ".pdf"), HwpFormat.Pdf);
     }
+    return 0;
+}
+
+static int BuildDefaultForm(string dir)
+{
+    var r = DefaultFormBuilder.Build(dir);
+    Console.WriteLine($"기본 양식을 만들었습니다: {Path.GetFullPath(dir)}");
+    Console.WriteLine($"  선택지 배치: {string.Join(", ", r.Form.ChoiceLayouts)}, <보기>: {r.Form.ViewBox?.Line}, 자료: {r.Form.PassageBox?.Line}");
+    foreach (var n in r.Form.Notes) Console.WriteLine($"  참고: {n}");
     return 0;
 }
 

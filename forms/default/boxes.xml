@@ -1,0 +1,89 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<boxes>
+  <view>
+    <p id="0" paraPrIDRef="1" styleIDRef="24" pageBreak="0" columnBreak="0" merged="0" xmlns="http://www.hancom.co.kr/hwpml/2011/paragraph">
+      <run charPrIDRef="0">
+        <tbl id="1221200316" zOrder="1" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1" rowCnt="2" colCnt="1" cellSpacing="0" borderFillIDRef="3" noAdjust="0">
+          <sz width="0" widthRelTo="ABSOLUTE" height="0" heightRelTo="ABSOLUTE" protect="0" />
+          <pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0" />
+          <outMargin left="283" right="283" top="283" bottom="283" />
+          <inMargin left="510" right="510" top="141" bottom="141" />
+          <tr>
+            <tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="3">
+              <subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">
+                <p id="0" paraPrIDRef="26" styleIDRef="30" pageBreak="0" columnBreak="0" merged="0">
+                  <run charPrIDRef="0">
+                    <t>&lt;보 기&gt;</t>
+                  </run>
+                </p>
+              </subList>
+              <cellAddr colAddr="0" rowAddr="0" />
+              <cellSpan colSpan="1" rowSpan="1" />
+              <cellSz width="22310" height="282" />
+              <cellMargin left="510" right="510" top="141" bottom="141" />
+            </tc>
+          </tr>
+          <tr>
+            <tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="3">
+              <subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">
+                <p id="0" paraPrIDRef="25" styleIDRef="29" pageBreak="0" columnBreak="0" merged="0">
+                  <run charPrIDRef="0">
+                    <t>첫째 진술</t>
+                  </run>
+                </p>
+                <p id="0" paraPrIDRef="25" styleIDRef="29" pageBreak="0" columnBreak="0" merged="0">
+                  <run charPrIDRef="0">
+                    <t>둘째 진술</t>
+                  </run>
+                </p>
+                <p id="0" paraPrIDRef="25" styleIDRef="29" pageBreak="0" columnBreak="0" merged="0">
+                  <run charPrIDRef="0">
+                    <t>셋째 진술</t>
+                  </run>
+                </p>
+              </subList>
+              <cellAddr colAddr="0" rowAddr="1" />
+              <cellSpan colSpan="1" rowSpan="1" />
+              <cellSz width="22310" height="282" />
+              <cellMargin left="510" right="510" top="141" bottom="141" />
+            </tc>
+          </tr>
+        </tbl>
+        <t />
+      </run>
+    </p>
+  </view>
+  <passage>
+    <p id="0" paraPrIDRef="30" styleIDRef="24" pageBreak="0" columnBreak="0" merged="0" xmlns="http://www.hancom.co.kr/hwpml/2011/paragraph">
+      <run charPrIDRef="0">
+        <tbl id="1221200315" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1" rowCnt="1" colCnt="1" cellSpacing="0" borderFillIDRef="3" noAdjust="0">
+          <sz width="22310" widthRelTo="ABSOLUTE" height="2782" heightRelTo="ABSOLUTE" protect="0" />
+          <pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0" />
+          <outMargin left="283" right="283" top="283" bottom="283" />
+          <inMargin left="510" right="510" top="141" bottom="141" />
+          <tr>
+            <tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="3">
+              <subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">
+                <p id="0" paraPrIDRef="27" styleIDRef="31" pageBreak="0" columnBreak="0" merged="0">
+                  <run charPrIDRef="0">
+                    <t>(가) 첫째 과정</t>
+                  </run>
+                </p>
+                <p id="0" paraPrIDRef="27" styleIDRef="31" pageBreak="0" columnBreak="0" merged="0">
+                  <run charPrIDRef="0">
+                    <t>(나) 둘째 과정</t>
+                  </run>
+                </p>
+              </subList>
+              <cellAddr colAddr="0" rowAddr="0" />
+              <cellSpan colSpan="1" rowSpan="1" />
+              <cellSz width="22310" height="282" />
+              <cellMargin left="510" right="510" top="141" bottom="141" />
+            </tc>
+          </tr>
+        </tbl>
+        <t />
+      </run>
+    </p>
+  </passage>
+</boxes>

@@ -17,6 +17,9 @@ public static class FormRendering
 
     public static bool IsFormDir(string dir) => File.Exists(Path.Combine(dir, ExamForm.FileName));
 
+    /// <summary>내장 기본 양식 폴더(프로그램 옆 forms/default). <see cref="DefaultFormBuilder"/>로 만든다.</summary>
+    public static string DefaultFormDir => Path.Combine(AppContext.BaseDirectory, "forms", "default");
+
     /// <param name="output">학생용 출력(.hwp/.hwpx). 원안지는 같은 폴더에 "_원안지"를 붙인다.</param>
     public static List<RenderedFile> Render(Exam exam, string formDir, string? examDir, string output, bool original, bool pdf, bool visible = false)
     {

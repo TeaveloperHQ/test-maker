@@ -3,6 +3,23 @@ using static TestMaker.Core.Forms.Hx;
 
 namespace TestMaker.Core.Forms;
 
+/// <summary>새 문단 모양 명세. 길이는 HWPUNIT(1pt = 100).</summary>
+public sealed record ParaShapeSpec
+{
+    public string Align { get; init; } = "JUSTIFY";
+    public string Heading { get; init; } = "NONE";
+    public int NumberingId { get; init; }
+    /// <summary>번호 수준(0부터: 0 = "^1" 수준)</summary>
+    public int Level { get; init; }
+    public int Left { get; init; }
+    /// <summary>첫 줄 들여쓰기. 음수면 내어쓰기(번호 자리).</summary>
+    public int Indent { get; init; }
+    public int Before { get; init; }
+    public int After { get; init; }
+    public int LineSpacing { get; init; } = 160;
+    public int TabPr { get; init; }
+}
+
 /// <summary>번호 머리(개요/문단번호) 정보. Type이 NONE이면 번호 없음.</summary>
 public sealed record Heading(string Type, int NumberingId, int Level)
 {
@@ -167,6 +184,85 @@ public sealed class HeaderInfo(XDocument doc)
         }
         ParaProps.Add(p);
         ParaProps.SetAttributeValue("itemCnt", ParaProps.Elements(Hh + "paraPr").Count());
+        return id;
+    }
+
+    // ── 양식 만들기(내장 기본 양식 생성용) ──────────────────────
+    // 단위: 실제 HWPUNIT(1/7200인치). <hp:case>에 그대로, <hp:default>에 2배로 쓴다(한글이 그렇게 저장 — 실측).
+
+    /// <summary>번호 체계 추가. levels: (수준 1~, 형식 DIGIT/CIRCLED_DIGIT/HANGUL_JAMO…, 모양 "^1.", 번호 글자 모양 id 또는 null).</summary>
+    public int AddNumbering(params (int Level, string Format, string Text, int? CharPr)[] levels)
+    {
+        var numberings = Doc.Descendants(Hh + "numberings").First();
+        var num = new XElement(numberings.Elements(Hh + "numbering").First());
+        int id = NextId(numberings, "numbering");
+        num.SetAttributeValue("id", id);
+        foreach (var (level, format, text, charPr) in levels)
+        {
+            var head = num.Elements(Hh + "paraHead").First(h => Attr(h, "level") == level);
+            head.SetAttributeValue("numFormat", format);
+            head.SetAttributeValue("charPrIDRef", charPr is int c ? c : 4294967295L);
+            // 자동 내어쓰기를 끄고 문단 여백(내어쓰기)으로 번호 자리를 잡는다. 켜 두면 여백이 이중으로 들어간다(실측).
+            head.SetAttributeValue("autoIndent", 0);
+            head.Value = text;
+        }
+        numberings.Add(num);
+        numberings.SetAttributeValue("itemCnt", numberings.Elements(Hh + "numbering").Count());
+        return id;
+    }
+
+    /// <summary>왼쪽 탭 위치(문단 왼쪽 여백 기준, HWPUNIT) 정의를 추가한다.</summary>
+    public int AddTabStops(params int[] positions)
+    {
+        var tabs = Doc.Descendants(Hh + "tabProperties").First();
+        int id = NextId(tabs, "tabPr");
+        var tab = new XElement(Hh + "tabPr", new XAttribute("id", id), new XAttribute("autoTabLeft", 0), new XAttribute("autoTabRight", 0));
+        foreach (var pos in positions)
+            tab.Add(new XElement(Hp + "switch",
+                new XElement(Hp + "case", new XAttribute(Hp + "required-namespace", "http://www.hancom.co.kr/hwpml/2016/HwpUnitChar"),
+                    new XElement(Hh + "tabItem", new XAttribute("pos", pos), new XAttribute("type", "LEFT"), new XAttribute("leader", "NONE"), new XAttribute("unit", "HWPUNIT"))),
+                new XElement(Hp + "default",
+                    new XElement(Hh + "tabItem", new XAttribute("pos", pos * 2), new XAttribute("type", "LEFT"), new XAttribute("leader", "NONE")))));
+        tabs.Add(tab);
+        tabs.SetAttributeValue("itemCnt", tabs.Elements(Hh + "tabPr").Count());
+        return id;
+    }
+
+    /// <summary>바탕글 문단 모양(id 0)을 바탕으로 새 문단 모양을 추가한다.</summary>
+    public int AddParaShape(ParaShapeSpec s)
+    {
+        var p = new XElement(ParaPr(0)!);
+        int id = NextId(ParaProps, "paraPr");
+        p.SetAttributeValue("id", id);
+        p.SetAttributeValue("tabPrIDRef", s.TabPr);
+        p.Element(Hh + "align")!.SetAttributeValue("horizontal", s.Align);
+        var h = p.Element(Hh + "heading")!;
+        h.SetAttributeValue("type", s.Heading);
+        h.SetAttributeValue("idRef", s.NumberingId);
+        h.SetAttributeValue("level", s.Level);
+        foreach (var margin in p.Descendants(Hh + "margin"))
+        {
+            int scale = margin.Parent?.Name.LocalName == "default" ? 2 : 1;
+            margin.Element(Hc + "intent")!.SetAttributeValue("value", s.Indent * scale);
+            margin.Element(Hc + "left")!.SetAttributeValue("value", s.Left * scale);
+            margin.Element(Hc + "prev")!.SetAttributeValue("value", s.Before * scale);
+            margin.Element(Hc + "next")!.SetAttributeValue("value", s.After * scale);
+        }
+        foreach (var ls in p.Descendants(Hh + "lineSpacing")) ls.SetAttributeValue("value", s.LineSpacing);
+        ParaProps.Add(p);
+        ParaProps.SetAttributeValue("itemCnt", ParaProps.Elements(Hh + "paraPr").Count());
+        return id;
+    }
+
+    /// <summary>문단 스타일을 추가하고 id(= 한글 COM의 스타일 번호)를 돌려준다.</summary>
+    public int AddStyle(string name, int paraPr, int charPr)
+    {
+        int id = NextId(Styles, "style");
+        Styles.Add(new XElement(Hh + "style",
+            new XAttribute("id", id), new XAttribute("type", "PARA"), new XAttribute("name", name), new XAttribute("engName", ""),
+            new XAttribute("paraPrIDRef", paraPr), new XAttribute("charPrIDRef", charPr), new XAttribute("nextStyleIDRef", id),
+            new XAttribute("langID", 1042), new XAttribute("lockForm", 0)));
+        Styles.SetAttributeValue("itemCnt", Styles.Elements(Hh + "style").Count());
         return id;
     }
 
