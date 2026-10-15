@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 한글 설치 여부와 무관한 부분: 문항 모델, JSON, 검증, HWPX 양식 분석 -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TestMaker.Tests" />
+  </ItemGroup>
+
+</Project>

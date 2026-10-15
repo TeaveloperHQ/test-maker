@@ -1,0 +1,143 @@
+using System.IO.Compression;
+using System.Xml.Linq;
+using TestMaker.Core.Forms;
+using TestMaker.Core.Models;
+
+namespace TestMaker.Tests.Core;
+
+/// <summary>
+/// 한글 없이 도는 양식 학습·조립 테스트. Fixtures/school_exam.hwpx 는 SchoolExamFixture로 만든 무질서형 시험지
+/// (번호 "1)"를 글자로 입력, 선택지 한 줄 5개, 유의사항에 "1. 2." 번호).
+/// 다시 만들려면: TESTMAKER_WRITE_FIXTURE=1 dotnet test --filter Learn_and_render_unstructured
+/// </summary>
+public sealed class FormLearnerTests : IDisposable
+{
+    static readonly XNamespace Hp = Hx.Hp;
+    static readonly string Fixture = Path.Combine(AppContext.BaseDirectory, "Fixtures", "school_exam.hwpx");
+    readonly string dir = Directory.CreateTempSubdirectory("testmaker_form_").FullName;
+
+    public void Dispose() => Directory.Delete(dir, recursive: true);
+
+    // ── 무질서형 번호열 찾기 ──────────────────────────────────
+
+    [Fact]
+    public void Finds_typed_question_numbers_in_order()
+    {
+        Assert.Equal([1, 3, 5], FormLearner.FindQuestionSequence(["제목", "1. 첫 문항", "① 가", "2. 둘째", "① 가", "3) 셋째"]));
+    }
+
+    [Fact]
+    public void Notice_list_is_not_mistaken_for_questions()
+    {
+        // 유의사항 1. 2. 와 문항 1. 2. 의 길이가 같으면 선택지가 따라오는 쪽(문항)
+        Assert.Equal([2, 4], FormLearner.FindQuestionSequence(["1. 이름을 쓰시오.", "2. 시간은 45분.", "1. 문항", "① 가", "2. 문항", "① 가"]));
+    }
+
+    [Fact]
+    public void Bare_number_paragraph_is_ignored()
+    {
+        Assert.Equal([1, 2], FormLearner.FindQuestionSequence(["1.", "1. 문항", "2. 문항"]));
+    }
+
+    // ── 선택지 줄 나누기 ────────────────────────────────────
+
+    [Fact]
+    public void Splits_typed_choice_line_and_keeps_separators()
+    {
+        var (count, seps) = FormLearner.SplitLine("① 가    ② 나\t③ 다", autoFirst: false);
+        Assert.Equal(3, count);
+        Assert.Equal(["    ", "\t"], seps);
+    }
+
+    [Fact]
+    public void Auto_numbered_first_choice_counts_as_an_item()
+    {
+        // 학교 양식: 첫 ①은 개요 번호, 나머지는 직접 입력
+        var (count, seps) = FormLearner.SplitLine("ㄱ, ㄴ\t\t\t② ㄴ, ㄷ\t\t③ ㄷ, ㄹ", autoFirst: true);
+        Assert.Equal(3, count);
+        Assert.Equal(["\t\t\t", "\t\t"], seps);
+    }
+
+    // ── 학습 ───────────────────────────────────────────────
+
+    [Fact]
+    public void Learns_unstructured_school_exam()
+    {
+        var r = FormLearner.Learn(Fixture, [], "가상학교");
+        var f = r.Form;
+
+        Assert.Equal(FormKind.Unstructured, f.Kind);
+        Assert.Equal(3, r.QuestionCount);
+        Assert.Equal("{0}) ", f.NumberFormat);
+        Assert.Equal("({0}점)", f.PointsFormat);
+        Assert.Equal(2, f.SpacerLines);
+        Assert.Equal(90, f.ColumnWidthMm, 0.5);
+
+        var oneLine = Assert.Single(f.ChoiceLayouts, l => l.Lines == 1);
+        Assert.Equal([5], oneLine.PerLine);
+        Assert.All(oneLine.Separators[0], s => Assert.Equal("    ", s));
+        // 자동번호 스타일이 없는 양식: 5행도 직접 입력
+        Assert.Contains(f.ChoiceLayouts, l => l.Lines == 5 && !l.Auto);
+        Assert.Contains(f.Notes, n => n.Contains("5행"));
+    }
+
+    [Fact]
+    public void Saved_form_keeps_preamble_and_marker_and_tail()
+    {
+        FormLearner.Learn(Fixture, [], "가상학교").Save(dir);
+
+        var text = AllText(Path.Combine(dir, ExamForm.BaseFile));
+        Assert.Contains("2026학년도 1학기 기말고사", text);
+        Assert.Contains("2. 시험 시간은 45분입니다.", text);
+        Assert.Contains(ExamForm.Marker, text);
+        Assert.Contains("- 수고하셨습니다 -", text);  // 꼬리(맺음말)도 남는다
+        Assert.DoesNotContain("발문입니다", text);
+        Assert.True(File.Exists(Path.Combine(dir, ExamForm.FileName)));
+    }
+
+    // ── 조립 ───────────────────────────────────────────────
+
+    [Fact]
+    public void Assembles_exam_with_school_numbering_and_marks_answers_in_original()
+    {
+        FormLearner.Learn(Fixture, [], "가상학교").Save(dir);
+        var form = Serialization(dir);
+        var exam = SampleExam.Create();
+
+        var student = Path.Combine(dir, "student.hwpx");
+        var original = Path.Combine(dir, "original.hwpx");
+        var ph = FormAssembler.Assemble(exam, form, dir, null, student, original: false);
+        FormAssembler.Assemble(exam, form, dir, null, original, original: true);
+
+        var text = AllText(student);
+        Assert.Contains("1) 다음 중 물질의 상태 변화", text);   // 무질서형: 번호를 학교 형식으로 직접 입력
+        Assert.Contains("(4점)", text);                          // 학교 배점 형식
+        Assert.Contains("③ 드라이아이스가", text);
+        Assert.Contains("5) 여름철", text);
+        Assert.Contains("- 수고하셨습니다 -", text);
+        Assert.DoesNotContain(ExamForm.Marker, text);
+
+        // 2번 문항 수식 8개(발문 3 + 선택지 5) + 해설은 시험지에 없음 → 자리표시 8개
+        Assert.Equal(8, ph.Count(p => p.Kind == PlaceholderKind.Equation));
+        Assert.All(ph, p => Assert.Contains(p.Key, text));
+
+        // 원안지에만 형광펜, 선택형 문항 수만큼
+        Assert.Equal(0, Count(student, "markpenBegin"));
+        Assert.Equal(exam.Questions.Count(q => q.Type == QuestionType.MultipleChoice), Count(original, "markpenBegin"));
+    }
+
+    static ExamForm Serialization(string formDir) =>
+        TestMaker.Core.Serialization.JsonStore.Load<ExamForm>(Path.Combine(formDir, ExamForm.FileName));
+
+    static string AllText(string hwpx)
+    {
+        var section = Hx.Load(hwpx, Hx.SectionPart);
+        return string.Join("\n", section.Descendants(Hp + "p").Select(Hx.Text));
+    }
+
+    static int Count(string hwpx, string element)
+    {
+        var section = Hx.Load(hwpx, Hx.SectionPart);
+        return section.Descendants(Hp + element).Count();
+    }
+}

@@ -1,0 +1,30 @@
+# Test Maker
+
+Exam-paper generator for Korean teachers. Goal: every school's 시험지 양식 differs; questions are authored style-free (JSON) and converted to the school's own style. User-facing docs: README.md (Korean).
+
+## Architecture (school forms = clone the school's own prototypes)
+- `src/TestMaker.Core/Forms` (pure XML, no 한글):
+  - `FormLearner` — classifies top-level paragraphs into roles (Stem, StemCont, GroupHeader, Figure, ViewBox, PassageBox, Choice, Spacer). Stems = paragraphs whose paraPr heading is OUTLINE/NUMBER level 0 (완성형); else typed "1." sequence (무질서형). Primary doc (school 양식 file) supplies styles/boxes/choice layouts; `--also` docs (real exams) supply usage stats (spacer count, most-used style *names*, observed para shapes). Writes form dir: `form.json` (ExamForm), `base.hwpx` (header + preamble + `{{문항}}` marker paragraph + tail), `boxes.xml` (box table prototypes).
+  - `FormAssembler` — copies base.hwpx, replaces marker paragraph with generated paragraphs referencing school style/paraPr/charPr ids; inline bold/underline via `HeaderInfo.CharVariant`; 원안지 answers wrapped in `hp:markpenBegin/End`; equations/images left as `#EQ001#`/`#IMG001#` placeholders.
+  - `HeaderInfo` — header.xml lookups + additive edits (char variants, unnumbered/indent-aligned para variants, importing para shape values from another doc). Never renumber existing ids.
+- `src/TestMaker.Hwp/FormRendering` — COM only for: .hwp→.hwpx normalization before learning, filling placeholders (RepeatFind → Delete → EquationCreate/InsertPicture), page-count pass for `{{쪽수}}`, SaveAs hwp/hwpx/pdf.
+- Legacy: `Templates/ExamTemplate` + `Hwp/ExamRenderer` (COM-typed direct formatting) still serve the no-template default. Planned: replace with a built-in styled form.
+
+## School conventions learned so far (the user's own school; sample paths are in local memory, never in the repo)
+- Outline numbering 1. → ① → ㄱ. ; 5행 choices use auto numbering, 1/2/3행 choices typed ①…⑤ with tabs (user rule).
+- `<보 기>` box = 3×3 table, content in merged bottom cell; lines use style "박스 ㄱㄴㄷ" (auto ㄱ.).
+- Continuation stems: same style with numbering off; align under stem text via `HeaderInfo.AlignUnder` (stem uses left 0 + negative intent hanging).
+- Fill-in fields in the form are blue text → auto-tokenized at learn time.
+
+## HWPX / 한글 facts (verified on 한컴오피스 2024 Edu — re-measure before "fixing")
+- COM `HStyle.Apply = n` uses the header style id. Applying a numbered style yields auto numbers; injected styles/numberings in header.xml are accepted.
+- Para margins: COM value == `<hp:default>` value == 2× `<hp:case>` value. Text color HWPX `#RRGGBB`, COM BGR via `RGBColor`.
+- Assembled XML opens fine with `id="0"` paragraphs and stripped `linesegarray` (한글 re-layouts). `<hp:tab>` width attrs are recomputed.
+- Re-saving base.hwpx through 한글 may renumber header ids → never re-save the learned base.
+- COM session: abort if attached to the user's open 한글; dispose always (unhandled exceptions skip finally → leaked Hwp.exe).
+- Legacy COM-typing gotchas: `BreakColDef` + MultiColumn `ApplyTo=2`; table ColWidth excludes 3.6mm cell padding; 한글 appends an empty paragraph after a table at doc end; tab stops via COM `TabDef` render inconsistently; `CreateItemArray` returns null in C# (set `Item` via reflection).
+
+## Conventions
+- User-facing strings/comments in Korean, actionable for teachers.
+- Never modify user-supplied files; work on temp copies. Don't commit school files; real-form tests use `TESTMAKER_SCHOOL_FORM`/`TESTMAKER_SCHOOL_EXAM`.
+- Verify layout changes visually: render with `--pdf` and read the PDF.
