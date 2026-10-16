@@ -28,14 +28,27 @@ public sealed class FormAssembler
     readonly bool original;
     readonly List<Placeholder> placeholders = [];
     readonly string? examDir;
+    readonly double defaultTabHu;
 
-    FormAssembler(ExamForm form, HeaderInfo header, XElement boxes, bool original, string? examDir)
+    FormAssembler(ExamForm form, HeaderInfo header, XElement boxes, bool original, string? examDir, double defaultTabHu)
     {
         this.form = form;
         this.header = header;
         this.boxes = boxes;
         this.original = original;
         this.examDir = examDir;
+        this.defaultTabHu = defaultTabHu;
+    }
+
+    /// <summary>문서 기본 탭 간격(실제 HWPUNIT). secPr의 tabStopVal(실제 값), 없으면 tabStop의 절반, 그것도 없으면 4000.</summary>
+    static double DefaultTab(XDocument section)
+    {
+        var sec = section.Descendants(Hp + "secPr").FirstOrDefault();
+        if (sec is null) return 4000;
+        int val = Attr(sec, "tabStopVal");
+        if (val > 0) return val;
+        int stop = Attr(sec, "tabStop");
+        return stop > 0 ? stop / 2.0 : 4000;
     }
 
     /// <param name="original">원안지: 정답 선택지에 형광펜.</param>
@@ -51,7 +64,7 @@ public sealed class FormAssembler
         using var zip = ZipFile.Open(outputHwpx, ZipArchiveMode.Update);
         var headerDoc = Load(zip, HeaderPart);
         var section = Load(zip, SectionPart);
-        var a = new FormAssembler(form, new HeaderInfo(headerDoc), boxes, original, examDir);
+        var a = new FormAssembler(form, new HeaderInfo(headerDoc), boxes, original, examDir, DefaultTab(section));
 
         var tokens = exam.Info.ToTokens(exam).ToDictionary();
         foreach (var (k, v) in extraTokens ?? new Dictionary<string, string>()) tokens[k] = v;
@@ -144,28 +157,42 @@ public sealed class FormAssembler
             yield break;
         }
 
+        // 칸 맞춤: 줄을 줄당 개수만큼 같은 폭의 칸으로 나누고, 다음 칸 시작까지 필요한 탭 수를 계산한다.
+        // (학교 견본의 탭 개수는 짧은 선택지 기준이라 그대로 쓰면 긴 선택지에서 넘친다.)
+        int textStart = header.MarginHu(layout.Style.ParaPr, "left");
+        int colHu = Templates.HwpUnit.FromMm(form.ColumnWidthMm);
+        double emHu = SizePt(layout.Style.CharPr) * 100;
+        var stops = header.TabStops(layout.Style.ParaPr);
+
         int idx = 0;
         for (int l = 0; l < layout.PerLine.Count; l++)
         {
             var runs = new List<XElement>();
+            double slot = (colHu - textStart) / (double)layout.MaxPerLine;
+            double x = textStart;
             for (int j = 0; j < layout.PerLine[l] && idx < q.Choices.Count; j++, idx++)
             {
                 var choiceRuns = new List<XElement> { Run(layout.Style.CharPr, [Format.ChoiceMark(idx + 1) + " "]) };
                 choiceRuns.AddRange(Rich(q.Choices[idx], layout.Style.CharPr));
                 runs.AddRange(Highlight(q, idx, choiceRuns));
+                x += (InlineMarkup.EstimateWidthEm(q.Choices[idx]) + 1.5) * emHu;
+
                 bool lastInLine = j == layout.PerLine[l] - 1 || idx == q.Choices.Count - 1;
-                if (!lastInLine) runs.Add(Run(layout.Style.CharPr, SeparatorPieces(layout, l, j)));
+                if (lastInLine) continue;
+                double target = textStart + slot * (j + 1);
+                int tabs = 0;
+                do { x = NextTabStop(x, stops); tabs++; } while (x < target - emHu / 2 && tabs < 20);
+                runs.Add(Run(layout.Style.CharPr, Enumerable.Range(0, tabs).Select(_ => (object)Tab())));
             }
             yield return Para(layout.Style, runs);
         }
     }
 
-    /// <summary>학교 견본의 간격(탭·공백)을 그대로 쓴다. 견본보다 칸이 많으면 탭 하나.</summary>
-    static IEnumerable<object> SeparatorPieces(ChoiceLayout layout, int line, int index)
+    /// <summary>x 다음 탭 위치: 문단의 탭 정의, 그 뒤로는 문서 기본 탭 간격(단 왼쪽 끝 기준).</summary>
+    double NextTabStop(double x, IReadOnlyList<int> stops)
     {
-        var sep = line < layout.Separators.Count && index < layout.Separators[line].Count ? layout.Separators[line][index] : "\t";
-        if (sep.Length == 0) sep = "\t";
-        foreach (var c in sep) yield return c == '\t' ? Tab() : c.ToString();
+        foreach (var s in stops) if (s > x + 1) return s;
+        return (Math.Floor(x / defaultTabHu) + 1) * defaultTabHu;
     }
 
     /// <summary>
@@ -227,7 +254,23 @@ public sealed class FormAssembler
         foreach (var (t, i) in lines)
             sub.Add(Para(proto.Line, Rich(Line(t, i, proto.AutoLabels), proto.Line.CharPr)));
         if (lines.Count == 0) sub.Add(Para(proto.Line, [EmptyRun(proto.Line.CharPr)]));
+        ShrinkRow(tbl, cell);
         return para;
+    }
+
+    /// <summary>
+    /// 내용 칸이 있는 행의 높이를 최소로 줄여 내용만큼만 커지게 한다.
+    /// (실제 시험지에서 뽑은 상자는 그림이 들어 있던 높이로 고정되어 있을 수 있다.)
+    /// </summary>
+    static void ShrinkRow(XElement tbl, XElement cell)
+    {
+        const int MinRow = 1000;
+        int row = Attr(cell.Element(Hp + "cellAddr") ?? cell, "rowAddr");
+        foreach (var tc in tbl.Descendants(Hp + "tc").Where(tc => Attr(tc.Element(Hp + "cellAddr") ?? tc, "rowAddr") == row))
+            tc.Element(Hp + "cellSz")?.SetAttributeValue("height", MinRow);
+        // 표 전체 높이 = 행마다 가장 높은 칸의 합
+        int total = tbl.Elements(Hp + "tr").Sum(tr => tr.Elements(Hp + "tc").Select(tc => Attr(tc.Element(Hp + "cellSz") ?? tc, "height")).DefaultIfEmpty(0).Max());
+        tbl.Element(Hp + "sz")?.SetAttributeValue("height", total);
     }
 
     // ── 그림 ─────────────────────────────────────────────────
@@ -268,16 +311,7 @@ public sealed class FormAssembler
         return runs.Count > 0 ? runs : [EmptyRun(charPr)];
     }
 
-    /// <summary>문단 모양의 왼쪽 여백(mm). &lt;hp:case&gt;가 실제 HWPUNIT, 없으면 &lt;hp:default&gt;의 절반.</summary>
-    double LeftMarginMm(int paraPr)
-    {
-        var p = header.ParaPr(paraPr);
-        if (p is null) return 0;
-        var caseLeft = p.Descendants(Hh + "margin").FirstOrDefault(m => m.Parent?.Name.LocalName == "case")?.Element(Hc + "left");
-        var anyLeft = p.Descendants(Hc + "left").FirstOrDefault();
-        double hu = caseLeft is not null ? Attr(caseLeft, "value") : (anyLeft is not null ? Attr(anyLeft, "value") / 2.0 : 0);
-        return Templates.HwpUnit.ToMm(hu);
-    }
+    double LeftMarginMm(int paraPr) => Templates.HwpUnit.ToMm(header.MarginHu(paraPr, "left"));
 
     double SizePt(int charPr) => (header.CharPr(charPr) is { } c ? Attr(c, "height", 1000) : 1000) / 100.0;
 

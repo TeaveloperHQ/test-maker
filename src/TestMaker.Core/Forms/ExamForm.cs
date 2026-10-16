@@ -68,7 +68,7 @@ public sealed class RoleStyle
 
 /// <summary>
 /// 선택지 배치 한 가지. 예: 2행 = 첫 줄 3개, 둘째 줄 2개.
-/// Separators[줄][i] = 그 줄 i번째 선택지 뒤 간격 문자열(\t = 탭). 학교 견본에서 그대로 배운다.
+/// 선택지 사이 탭 개수는 저장하지 않고 출력할 때 문단의 탭 위치로 계산한다(견본의 탭 개수는 짧은 선택지 기준).
 /// </summary>
 public sealed class ChoiceLayout
 {
@@ -77,7 +77,6 @@ public sealed class ChoiceLayout
     public RoleStyle Style { get; set; } = new();
     /// <summary>true면 한 줄에 하나, 번호(①)는 스타일이 붙인다(5행).</summary>
     public bool Auto { get; set; }
-    public List<List<string>> Separators { get; set; } = [];
 
     public int Count => PerLine.Sum();
     public int MaxPerLine => PerLine.Count == 0 ? 1 : PerLine.Max();

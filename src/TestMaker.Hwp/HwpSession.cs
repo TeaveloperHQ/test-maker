@@ -13,6 +13,8 @@ public sealed class HwpSession : IDisposable
 {
     const string ProgId = "HWPFrame.HwpObject";
     readonly dynamic hwp;
+    /// <summary>이 세션이 띄운 한글 프로세스. 닫을 때 완전히 끝날 때까지 기다린다.</summary>
+    readonly Process? ownProcess;
     bool disposed;
 
     public static bool IsInstalled => Type.GetTypeFromProgID(ProgId) is not null;
@@ -24,7 +26,9 @@ public sealed class HwpSession : IDisposable
         var before = Process.GetProcessesByName("Hwp").Select(p => p.Id).ToHashSet();
         hwp = Activator.CreateInstance(type)!;
 
-        bool fresh = Process.GetProcessesByName("Hwp").Any(p => !before.Contains(p.Id));
+        var started = Process.GetProcessesByName("Hwp").Where(p => !before.Contains(p.Id)).ToList();
+        bool fresh = started.Count > 0;
+        if (fresh) ownProcess = started[0];
         if (!fresh || (int)hwp.XHwpDocuments.Count != 1 || !string.IsNullOrEmpty((string)hwp.Path))
         {
             // 남의 창이므로 Clear/Quit 하지 않고 참조만 놓는다.
@@ -41,10 +45,15 @@ public sealed class HwpSession : IDisposable
 
     public void NewDocument() => hwp.Clear(1);
 
-    public void Open(string path)
+    /// <param name="displayName">오류 메시지에 보일 원래 파일 이름(임시 사본을 열 때).</param>
+    public void Open(string path, string? displayName = null)
     {
-        bool ok = hwp.Open(Path.GetFullPath(path), "", "forceopen:true");
-        if (!ok) throw new IOException($"한글에서 파일을 열지 못했습니다: {path}");
+        var name = displayName ?? Path.GetFileName(path);
+        if (HwpFileInfo.IsPasswordProtected(path))
+            throw new IOException($"암호가 걸린 한글 파일이라 열 수 없습니다: {name} — 한글에서 암호를 풀고 다른 이름으로 저장한 사본을 주세요.");
+        // suspendpassword: 암호 입력창을 띄우지 않는다(숨김 창에서 입력창이 뜨면 멈춘다).
+        bool ok = hwp.Open(Path.GetFullPath(path), "", "forceopen:true;suspendpassword:true");
+        if (!ok) throw new IOException($"한글에서 파일을 열지 못했습니다: {name}");
     }
 
     public void SaveAs(string path, HwpFormat format)
@@ -73,5 +82,9 @@ public sealed class HwpSession : IDisposable
         try { hwp.Clear(1); } catch (COMException) { }
         try { hwp.Quit(); } catch (COMException) { }
         Marshal.FinalReleaseComObject(hwp);
+        // 한글은 Quit 뒤에도 잠시 살아 있다. 바로 다음 세션이 그 인스턴스에 붙어
+        // "열려 있는 한글에 연결됨"으로 멈추지 않도록, 우리가 띄운 프로세스가 끝날 때까지 기다린다.
+        try { ownProcess?.WaitForExit(15_000); } catch (InvalidOperationException) { }
+        ownProcess?.Dispose();
     }
 }

@@ -28,13 +28,13 @@ public sealed class JsonStoreTests : IDisposable
     }
 
     [Fact]
-    public void Form_round_trips_and_keeps_choice_separators()
+    public void Form_round_trips_and_keeps_choice_layouts()
     {
         var f = new ExamForm
         {
             Name = "우리학교",
             NumberFormat = "{0}) ",
-            ChoiceLayouts = [new ChoiceLayout { Lines = 2, PerLine = [3, 2], Separators = [["\t\t", "\t"], ["\t"]] }],
+            ChoiceLayouts = [new ChoiceLayout { Lines = 2, PerLine = [3, 2] }],
         };
         var path = Path.Combine(dir, ExamForm.FileName);
         JsonStore.Save(path, f);
@@ -42,7 +42,7 @@ public sealed class JsonStoreTests : IDisposable
         var back = JsonStore.Load<ExamForm>(path);
         Assert.Equal("우리학교", back.Name);
         Assert.Equal("{0}) ", back.NumberFormat);
-        Assert.Equal(["\t\t", "\t"], back.ChoiceLayouts[0].Separators[0]);
+        Assert.Equal([3, 2], back.ChoiceLayouts[0].PerLine);
     }
 
     /// <summary>저장소의 내장 기본 양식(forms/default)이 프로그램 옆에 복사되고, 기대한 구조를 가진다.</summary>

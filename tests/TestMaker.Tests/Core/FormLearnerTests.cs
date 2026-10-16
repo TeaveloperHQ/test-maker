@@ -42,20 +42,16 @@ public sealed class FormLearnerTests : IDisposable
     // ── 선택지 줄 나누기 ────────────────────────────────────
 
     [Fact]
-    public void Splits_typed_choice_line_and_keeps_separators()
+    public void Counts_typed_choices_in_a_line()
     {
-        var (count, seps) = FormLearner.SplitLine("① 가    ② 나\t③ 다", autoFirst: false);
-        Assert.Equal(3, count);
-        Assert.Equal(["    ", "\t"], seps);
+        Assert.Equal(3, FormLearner.ChoiceCount("① 가    ② 나\t③ 다", autoFirst: false));
     }
 
     [Fact]
     public void Auto_numbered_first_choice_counts_as_an_item()
     {
         // 학교 양식: 첫 ①은 개요 번호, 나머지는 직접 입력
-        var (count, seps) = FormLearner.SplitLine("ㄱ, ㄴ\t\t\t② ㄴ, ㄷ\t\t③ ㄷ, ㄹ", autoFirst: true);
-        Assert.Equal(3, count);
-        Assert.Equal(["\t\t\t", "\t\t"], seps);
+        Assert.Equal(3, FormLearner.ChoiceCount("ㄱ, ㄴ\t\t\t② ㄴ, ㄷ\t\t③ ㄷ, ㄹ", autoFirst: true));
     }
 
     // ── 학습 ───────────────────────────────────────────────
@@ -75,7 +71,6 @@ public sealed class FormLearnerTests : IDisposable
 
         var oneLine = Assert.Single(f.ChoiceLayouts, l => l.Lines == 1);
         Assert.Equal([5], oneLine.PerLine);
-        Assert.All(oneLine.Separators[0], s => Assert.Equal("    ", s));
         // 자동번호 스타일이 없는 양식: 5행도 직접 입력
         Assert.Contains(f.ChoiceLayouts, l => l.Lines == 5 && !l.Auto);
         Assert.Contains(f.Notes, n => n.Contains("5행"));

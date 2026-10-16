@@ -178,22 +178,33 @@ public static class FormLearner
         }
 
         // 발문: 번호(개요/문단번호 1수준)가 걸린, 글이 있는 문단. 원문자로 시작하면 선택지다.
+        // 1수준 번호가 여러 체계면(예: 선택형 "1." + 논술형 "논술형 1>") 가장 많이 쓴 체계만 선택형 발문으로 보고,
+        // 나머지는 문항 경계로만 쓴다(그 문항 안 문단은 역할 통계에 넣지 않는다).
+        var numbered = new List<(int Index, Heading H)>();
         for (int i = 0; i < paras.Count; i++)
         {
             var h = header.HeadingOf(Attr(paras[i], "paraPrIDRef"));
             var t = a.Text[i].Trim();
             if (GroupRx.IsMatch(t)) { a.Groups.Add(i); continue; }
-            if (h.IsNumbered && h.Level == 0 && t.Length > 0 && !Circled.IsMatch(t[..1])) a.Stems.Add(i);
+            if (h.IsNumbered && h.Level == 0 && t.Length > 0 && !Circled.IsMatch(t[..1])) numbered.Add((i, h));
+        }
+        var main = numbered.GroupBy(x => (x.H.Type, x.H.NumberingId)).OrderByDescending(g => g.Count()).FirstOrDefault();
+        var otherStarts = new List<int>();
+        if (main is not null)
+        {
+            a.Stems.AddRange(main.Select(x => x.Index));
+            otherStarts.AddRange(numbered.Where(x => (x.H.Type, x.H.NumberingId) != main.Key).Select(x => x.Index));
         }
         if (a.Stems.Count < 2)
         {
             a.Stems.Clear();
+            otherStarts.Clear();
             a.Stems.AddRange(FindQuestionSequence(a.Text));
         }
         if (a.Stems.Count == 0) return a;
 
         foreach (var g in a.Groups) a.Items.Add(C(g, Role.GroupHeader));
-        var boundaries = a.Stems.Concat(a.Groups).Order().ToList();
+        var boundaries = a.Stems.Concat(a.Groups).Concat(otherStarts).Order().ToList();
         a.End = paras.Count;
 
         for (int k = 0; k < a.Stems.Count; k++)
@@ -340,13 +351,10 @@ public static class FormLearner
             var lines = g.Select(i => a.Text[i]).ToList();
             var heads = g.Select(i => a.Header.HeadingOf(Attr(a.Paras[i], "paraPrIDRef"))).ToList();
             var perLine = new List<int>();
-            var seps = new List<List<string>>();
             for (int l = 0; l < lines.Count; l++)
             {
                 bool autoFirst = heads[l].IsNumbered && heads[l].Level == 1 && !Circled.IsMatch(lines[l].TrimStart()[..1]);
-                var (count, sep) = SplitLine(lines[l], autoFirst);
-                perLine.Add(count);
-                seps.Add(sep);
+                perLine.Add(ChoiceCount(lines[l], autoFirst));
             }
 
             bool onePerLine = perLine.All(n => n == 1);
@@ -356,12 +364,14 @@ public static class FormLearner
                 autoStyle ??= new RoleStyle { StyleId = c.Style, ParaPr = c.ParaPr, CharPr = c.CharPr, AutoNumber = true, StyleName = info.StyleName(c.Style) };
                 continue;
             }
+            // 한 줄에 하나씩 손으로 친 선택지는 5행 배치다. 5행은 자동번호로 만드므로 견본으로 쓰지 않는다(아래에서 처리).
+            if (onePerLine) continue;
             if (layouts.ContainsKey(lines.Count)) continue;
 
             // 직접 입력 줄: 번호 없는 줄(보통 둘째 줄)의 모양을 쓰고, 그래도 번호가 있으면 뗀다.
             var src = ItemAt(a, g.FirstOrDefault(i => !a.Header.HeadingOf(Attr(a.Paras[i], "paraPrIDRef")).IsNumbered, g[0]));
             var style = new RoleStyle { StyleId = src.Style, ParaPr = info.Unnumbered(src.ParaPr), CharPr = src.CharPr, StyleName = info.StyleName(src.Style) };
-            layouts[lines.Count] = new ChoiceLayout { Lines = lines.Count, PerLine = perLine, Style = style, Separators = seps };
+            layouts[lines.Count] = new ChoiceLayout { Lines = lines.Count, PerLine = perLine, Style = style };
         }
 
         // 5행 자동번호: 견본이 없으면 발문과 같은 번호 체계의 2수준 스타일을 header에서 찾는다.
@@ -382,7 +392,7 @@ public static class FormLearner
         else
         {
             var typed = result.FirstOrDefault()?.Style ?? stem;
-            result.Add(new ChoiceLayout { Lines = 5, PerLine = [1, 1, 1, 1, 1], Style = typed, Separators = [[], [], [], [], []] });
+            result.Add(new ChoiceLayout { Lines = 5, PerLine = [1, 1, 1, 1, 1], Style = typed });
             notes.Add("선택지 자동번호 스타일이 없어 5행 선택지도 원문자를 직접 입력합니다.");
         }
         return result;
@@ -390,22 +400,9 @@ public static class FormLearner
 
     static Cls ItemAt(Analysis a, int index) => a.Items.First(c => c.Index == index);
 
-    /// <summary>선택지 줄 하나를 원문자 기준으로 나눠, 개수와 각 선택지 뒤 간격(탭·공백)을 돌려준다.</summary>
-    internal static (int Count, List<string> Separators) SplitLine(string line, bool autoFirst)
-    {
-        var marks = Circled.Matches(line).Select(m => m.Index).ToList();
-        var starts = new List<int>();
-        if (autoFirst) starts.Add(0);
-        starts.AddRange(marks);
-        var seps = new List<string>();
-        for (int j = 0; j + 1 < starts.Count; j++)
-        {
-            var seg = line[starts[j]..starts[j + 1]];
-            var trimmed = seg.TrimEnd(' ', '\t');
-            seps.Add(seg[trimmed.Length..]);
-        }
-        return (starts.Count, seps);
-    }
+    /// <summary>선택지 줄 하나에 든 선택지 수. 첫 ①이 개요 번호로 붙는 줄이면(autoFirst) 하나를 더 센다.</summary>
+    internal static int ChoiceCount(string line, bool autoFirst) =>
+        Circled.Matches(line).Count + (autoFirst ? 1 : 0);
 
     // ── 상자 ─────────────────────────────────────────────────
 

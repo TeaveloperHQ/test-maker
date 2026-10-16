@@ -55,6 +55,40 @@ public sealed class HeaderInfo(XDocument doc)
 
     public bool IsBold(int charPrId) => CharPr(charPrId)?.Element(Hh + "bold") is not null;
 
+    /// <summary>
+    /// 문단 모양에서 실제 HWPUNIT 값 하나(&lt;hp:case&gt; 값, 없으면 &lt;hp:default&gt;의 절반).
+    /// name: intent/left/right/prev/next.
+    /// </summary>
+    public int MarginHu(int paraPrId, string name)
+    {
+        var p = ParaPr(paraPrId);
+        if (p is null) return 0;
+        var inCase = p.Descendants(Hh + "margin").FirstOrDefault(m => m.Parent?.Name.LocalName == "case")?.Element(Hc + name);
+        if (inCase is not null) return Attr(inCase, "value");
+        var any = p.Descendants(Hc + name).FirstOrDefault();
+        return any is null ? 0 : Attr(any, "value") / 2;
+    }
+
+    /// <summary>문단 모양에 정의된 왼쪽 탭 위치들(실제 HWPUNIT, 단 왼쪽 끝 기준 — 실측).</summary>
+    public IReadOnlyList<int> TabStops(int paraPrId)
+    {
+        var p = ParaPr(paraPrId);
+        if (p is null) return [];
+        int tabId = Attr(p, "tabPrIDRef");
+        var tab = Doc.Descendants(Hh + "tabPr").FirstOrDefault(t => Attr(t, "id", -1) == tabId);
+        if (tab is null) return [];
+        var stops = new List<int>();
+        foreach (var sw in tab.Elements(Hp + "switch"))
+        {
+            var inCase = sw.Element(Hp + "case")?.Element(Hh + "tabItem");
+            var inDefault = sw.Element(Hp + "default")?.Element(Hh + "tabItem");
+            if (inCase is not null) stops.Add(Attr(inCase, "pos"));
+            else if (inDefault is not null) stops.Add(Attr(inDefault, "pos") / 2);
+        }
+        foreach (var item in tab.Elements(Hh + "tabItem")) stops.Add(Attr(item, "pos"));
+        return [.. stops.Order()];
+    }
+
     /// <summary>같은 글자 모양에 굵게/밑줄만 더한 글자 모양 id. 필요하면 새로 만든다.</summary>
     public int CharVariant(int charPrId, bool bold, bool underline)
     {

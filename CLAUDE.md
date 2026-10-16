@@ -25,6 +25,11 @@ Exam-paper generator for Korean teachers. Goal: every school's 시험지 양식 
 - Tab stops (`hh:tabItem pos`, `<hp:case>` = real HWPUNIT) are measured from the column's left edge, NOT the paragraph's left margin.
 - Numbered paragraphs: set numbering `paraHead autoIndent="0"` (as school forms do); then the number sits at the paragraph's left margin, a negative `intent` makes wrapped lines hang under the text. With autoIndent=1 the indent is applied twice.
 - Choice-layout fit: needed = (longest + "① " 1.5em + 1em gap) × em; slot = (column − choice left margin) / per-line.
+- Typed choice lines: tab count is computed per gap (slot targets vs. paraPr tab stops, then secPr `tabStopVal` default interval). Never copy the prototype's tab counts — schools tune them for 1-2 char choices.
+- Password-protected .hwp (FileHeader props bit1; school 원안지 often are): 한글 shows a password dialog that hangs a hidden instance. `HwpFileInfo` pre-checks; `Open` passes `suspendpassword:true`.
+- After `Quit`, Hwp.exe lingers briefly; a new session can attach to it and abort. `HwpSession.Dispose` waits for its own process to exit.
+- Forms may number several question types at level 0 (선택형 "1." + 논술형 "논술형 1>"): only the most-used numbering is treated as stems; others are block boundaries.
+- Boxes cloned from real exams may have fixed tall rows (they held figures): `ShrinkRow` resets the content row height.
 - COM session: abort if attached to the user's open 한글; dispose always (unhandled exceptions skip finally → leaked Hwp.exe).
 - COM-typing gotchas (builder/answer sheet): `BreakColDef` + MultiColumn `ApplyTo=2`; table ColWidth excludes 3.6mm cell padding; 한글 appends an empty paragraph after a table at doc end; tab stops via COM `TabDef` render inconsistently; `CreateItemArray` returns null in C# (set `Item` via reflection).
 

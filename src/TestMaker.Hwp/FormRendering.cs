@@ -99,18 +99,25 @@ public static class FormRendering
     /// <param name="extras">실제 시험지들(문항 간격 등 실제 사용 통계만).</param>
     public static FormLearnResult Learn(string primary, IReadOnlyList<string> extras, string formDir, string? name = null)
     {
+        // 한글을 띄우기 전에 파일을 모두 확인한다(없거나 암호가 걸린 파일).
+        foreach (var f in extras.Prepend(primary))
+        {
+            if (!File.Exists(f)) throw new FileNotFoundException($"파일이 없습니다: {f}");
+            if (HwpFileInfo.IsPasswordProtected(f))
+                throw new IOException($"암호가 걸린 한글 파일이라 학습에 쓸 수 없습니다: {Path.GetFileName(f)} — 한글에서 암호를 풀고 다른 이름으로 저장한 사본을 주세요.");
+        }
+
         var work = Directory.CreateTempSubdirectory("testmaker_learn_").FullName;
         try
         {
             using var session = new HwpSession();
             string Normalize(string src, int i)
             {
-                if (!File.Exists(src)) throw new FileNotFoundException($"파일이 없습니다: {src}");
                 var copy = Path.Combine(work, $"src{i}{Path.GetExtension(src)}");
                 File.Copy(src, copy);
                 var hwpx = Path.Combine(work, $"src{i}_n.hwpx");
                 session.NewDocument();
-                session.Open(copy);
+                session.Open(copy, Path.GetFileName(src));
                 session.SaveAs(hwpx, HwpFormat.Hwpx);
                 return hwpx;
             }

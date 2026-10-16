@@ -3,7 +3,7 @@
   "learnedFrom": [
     "내장 표준 양식"
   ],
-  "learnedAt": "2026-10-15T15:17:36.1326845+09:00",
+  "learnedAt": "2026-10-16T10:17:19.5352355+09:00",
   "kind": "Structured",
   "columnWidthMm": 86,
   "stem": {
@@ -58,14 +58,6 @@
         "autoNumber": false
       },
       "auto": false,
-      "separators": [
-        [
-          "\t",
-          "\t",
-          "\t",
-          "\t"
-        ]
-      ],
       "count": 5,
       "maxPerLine": 5
     },
@@ -83,15 +75,6 @@
         "autoNumber": false
       },
       "auto": false,
-      "separators": [
-        [
-          "\t",
-          "\t"
-        ],
-        [
-          "\t"
-        ]
-      ],
       "count": 5,
       "maxPerLine": 3
     },
@@ -110,15 +93,6 @@
         "autoNumber": false
       },
       "auto": false,
-      "separators": [
-        [
-          "\t"
-        ],
-        [
-          "\t"
-        ],
-        []
-      ],
       "count": 5,
       "maxPerLine": 2
     },
@@ -139,7 +113,6 @@
         "autoNumber": true
       },
       "auto": true,
-      "separators": [],
       "count": 5,
       "maxPerLine": 1
     }
