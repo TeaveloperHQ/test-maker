@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using TestMaker.Core.Forms;
 using TestMaker.Core.Models;
 using TestMaker.Core.Serialization;
@@ -110,7 +110,7 @@ static int Render(string path, string[] rest)
 
 static int BuildDefaultForm(string dir)
 {
-    var r = DefaultFormBuilder.Build(dir);
+    var r = DefaultFormBuilder.Build(dir, m => Console.WriteLine($"  … {m}"));
     Console.WriteLine($"기본 양식을 만들었습니다: {Path.GetFullPath(dir)}");
     Console.WriteLine($"  선택지 배치: {string.Join(", ", r.Form.ChoiceLayouts)}, <보기>: {r.Form.ViewBox?.Line}, 자료: {r.Form.PassageBox?.Line}");
     foreach (var n in r.Form.Notes) Console.WriteLine($"  참고: {n}");

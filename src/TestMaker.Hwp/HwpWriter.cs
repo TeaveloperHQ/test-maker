@@ -40,6 +40,17 @@ public sealed class HwpWriter(HwpSession session)
         hwp.HAction.Execute("InsertText", p.HSet);
     }
 
+    /// <summary>쪽 번호를 아래 가운데에 "- 1 -" 모양으로 넣는다.</summary>
+    public void PageNumber()
+    {
+        var p = hwp.HParameterSet.HPageNumPos;
+        hwp.HAction.GetDefault("PageNumPos", p.HSet);
+        p.DrawPos = 5;      // 아래 가운데
+        p.NumberFormat = 0; // 1, 2, 3
+        p.SideChar = (int)'-';
+        hwp.HAction.Execute("PageNumPos", p.HSet);
+    }
+
     /// <summary>현재 문단에 문단 스타일을 적용한다. id = header.xml의 스타일 id.</summary>
     public void Style(int id)
     {

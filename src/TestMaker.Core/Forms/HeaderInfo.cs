@@ -224,6 +224,49 @@ public sealed class HeaderInfo(XDocument doc)
     // ── 양식 만들기(내장 기본 양식 생성용) ──────────────────────
     // 단위: 실제 HWPUNIT(1/7200인치). <hp:case>에 그대로, <hp:default>에 2배로 쓴다(한글이 그렇게 저장 — 실측).
 
+    static readonly string[] Langs = ["HANGUL", "LATIN", "HANJA", "JAPANESE", "OTHER", "SYMBOL", "USER"];
+
+    /// <summary>모든 언어(한글·영문·한자…)의 글꼴 목록에 글꼴을 넣고(이미 있으면 그대로) 언어별 id를 돌려준다.</summary>
+    public Dictionary<string, int> AddFont(string face)
+    {
+        var ids = new Dictionary<string, int>();
+        foreach (var lang in Langs)
+        {
+            var ff = Doc.Descendants(Hh + "fontface").FirstOrDefault(f => (string?)f.Attribute("lang") == lang);
+            if (ff is null) continue;
+            var existing = ff.Elements(Hh + "font").FirstOrDefault(f => (string?)f.Attribute("face") == face);
+            if (existing is not null) { ids[lang] = Attr(existing, "id"); continue; }
+            int id = NextId(ff, "font");
+            ff.Add(new XElement(Hh + "font", new XAttribute("id", id), new XAttribute("face", face), new XAttribute("type", "TTF"), new XAttribute("isEmbedded", 0)));
+            ff.SetAttributeValue("fontCnt", ff.Elements(Hh + "font").Count());
+            ids[lang] = id;
+        }
+        return ids;
+    }
+
+    /// <summary>바탕글 글자 모양(id 0)을 바탕으로 글꼴·크기·굵기를 바꾼 글자 모양을 추가한다.</summary>
+    public int AddCharShape(Dictionary<string, int> fontIds, double sizePt, bool bold = false)
+    {
+        var c = new XElement(CharPr(0)!);
+        int id = NextId(CharProps, "charPr");
+        c.SetAttributeValue("id", id);
+        c.SetAttributeValue("height", (int)Math.Round(sizePt * 100));
+        var fontRef = c.Element(Hh + "fontRef")!;
+        foreach (var (lang, fid) in fontIds) fontRef.SetAttributeValue(lang.ToLowerInvariant(), fid);
+        c.Element(Hh + "bold")?.Remove();
+        if (bold)
+        {
+            var b = new XElement(Hh + "bold");
+            if (c.Element(Hh + "underline") is { } u) u.AddBeforeSelf(b); else c.Add(b);
+        }
+        CharProps.Add(c);
+        CharProps.SetAttributeValue("itemCnt", CharProps.Elements(Hh + "charPr").Count());
+        return id;
+    }
+
+    /// <summary>스타일의 글자 모양을 바꾼다(예: 바탕글을 본문 글꼴로).</summary>
+    public void SetStyleCharShape(int styleId, int charPr) => Style(styleId)?.SetAttributeValue("charPrIDRef", charPr);
+
     /// <summary>번호 체계 추가. levels: (수준 1~, 형식 DIGIT/CIRCLED_DIGIT/HANGUL_JAMO…, 모양 "^1.", 번호 글자 모양 id 또는 null).</summary>
     public int AddNumbering(params (int Level, string Format, string Text, int? CharPr)[] levels)
     {

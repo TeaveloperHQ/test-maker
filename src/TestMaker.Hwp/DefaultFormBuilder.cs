@@ -5,22 +5,49 @@ using TestMaker.Core.Templates;
 namespace TestMaker.Hwp;
 
 /// <summary>
-/// 내장 기본 양식(forms/default)을 만든다(개발용, 한글 필요).
-/// 스타일·개요번호가 갖춰진 "표준 시험지"를 한글로 생성한 뒤, 학교 양식과 똑같이 <see cref="FormLearner"/>로 학습한다.
-/// 그래서 기본 양식도 학교 양식과 같은 경로로 출력되고, 선생님이 스타일만 고치면 전체가 바뀐다.
+/// 표준 시험지 양식을 만든다(개발용, 한글 필요).
+///  1) 스타일·개요번호가 갖춰진 "표준 시험지 양식(B4).hwp"를 한글로 생성 — 선생님들이 앱 없이 바로 쓰는 배포용
+///  2) 그 문서를 학교 양식과 똑같이 <see cref="FormLearner"/>로 학습 → 앱의 내장 기본 양식(forms/default)
 ///
-/// 번호 체계: 문항 1. → 선택지 ① → 보기 ㄱ.  (5행 선택지만 자동번호, 나머지는 직접 입력 + 탭)
+/// 판형: B4 2단(학교 지필평가·학력평가와 같은 판형). 본문 한양신명조 11pt.
+/// 모든 글은 스타일을 거친다 — 학교 사정에 맞게 스타일에서 글꼴·크기만 바꾸면 전체가 바뀐다.
+/// 번호 체계: 문항 1. → 선택지 ① → 보기 ㄱ.  (5행 선택지만 자동번호, 2·3행은 원문자 직접 입력 + 칸에 맞춘 탭)
+/// 머리 부분: 학교 지필평가형(결재란, 시험명·과목 상자, 유의사항). 학교마다 다르므로 학교 양식은 학습해서 쓴다.
 /// </summary>
 public static class DefaultFormBuilder
 {
-    // A4, 좌우 여백 15mm, 2단 간격 8mm → 단 폭 86mm
-    static readonly PageProfile Page = new() { MarginLeftMm = 15, MarginRightMm = 15, MarginTopMm = 15, MarginBottomMm = 15, HeaderMm = 10, FooterMm = 10 };
-    static readonly ColumnProfile Columns = new() { Count = 2, GapMm = 8, Line = true };
-    const int StemHang = 1500;    // 문항 번호 자리(15pt)
-    const int ChoiceHang = 1300;  // ① 자리
-    const int ViewHang = 1500;    // ㄱ. 자리
+    public const string DistributionFile = "표준 시험지 양식(B4).hwp";
+    const string Font = "한양신명조";
+    const double BodyPt = 11;
 
-    public static FormLearnResult Build(string formDir)
+    // B4 257×364mm, 좌우 19mm·위아래 10mm, 2단 간격 8mm → 단 폭 105.5mm (학교 지필평가 시험지와 같은 값)
+    static readonly PageProfile Page = new()
+    {
+        WidthMm = 257, HeightMm = 364,
+        MarginLeftMm = 19, MarginRightMm = 19, MarginTopMm = 10, MarginBottomMm = 10, HeaderMm = 11, FooterMm = 10,
+    };
+    static readonly ColumnProfile Columns = new() { Count = 2, GapMm = 8, Line = true };
+    const int StemHang = 1650;    // 문항 번호 자리(11pt 글자 "10." 너비 정도)
+    const int ChoiceHang = 1400;  // ① 자리
+    const int ViewHang = 1650;    // ㄱ. 자리
+
+    static readonly TextStyle Body = new() { FontHangul = Font, FontLatin = Font, SizePt = BodyPt };
+
+    /// <summary>배포용 파일에서 자리표시 대신 넣을 예시 글.</summary>
+    static readonly (string Token, string Text)[] DistributionText =
+    [
+        ("{{제목}}", "○○○○학년도 ○학기 ○차 지필평가"),
+        ("{{과목띄움}}", "과    목"),
+        ("{{학년}}", "○학년"),
+        ("{{일시}}", "○○○○년 ○월 ○일 ○교시"),
+        ("{{학교}}", "○○중학교"),
+        ("{{쪽수}}", "○"),
+        ("{{문항수}}", "○○"),
+        ("{{총점}}", "100"),
+    ];
+
+    /// <param name="formDir">내장 양식 폴더(forms/default). 배포용 .hwp는 그 상위 폴더에 쓴다.</param>
+    public static FormLearnResult Build(string formDir, Action<string>? log = null)
     {
         var work = Directory.CreateTempSubdirectory("testmaker_defaultform_").FullName;
         try
@@ -29,22 +56,28 @@ public static class DefaultFormBuilder
             var blank = Path.Combine(work, "blank.hwpx");
             session.NewDocument();
             session.SaveAs(blank, HwpFormat.Hwpx);
+            session.NewDocument(); // 파일 잠금 해제
 
             var styled = Path.Combine(work, "styled.hwpx");
             File.Copy(blank, styled);
             var ids = AddStyles(styled);
 
             var source = Path.Combine(work, "standard.hwpx");
-            session.NewDocument();
             session.Open(styled);
-            WriteSample(new HwpWriter(session), ids);
-            session.SaveAs(source, HwpFormat.Hwpx);
+            WriteSample(new HwpWriter(session), ids, log ?? (_ => { }));
+            session.SaveAs(source, HwpFormat.Hwpx); // 앱용: {{자리표시}} 그대로
 
-            var result = FormLearner.Learn(source, [], "기본");
-            result.Form.LearnedFrom = ["내장 표준 양식"];
+            // 배포용: 앱 없이 쓰는 선생님이 바로 고쳐 쓰도록 자리표시를 예시 글로 바꿔 저장
+            var w = new HwpWriter(session);
+            foreach (var (token, text) in DistributionText) w.ReplaceAll(token, text);
+            var dist = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(formDir))!, DistributionFile);
+            session.SaveAs(dist, HwpFormat.Hwp);
+            session.NewDocument();
+
+            var result = FormLearner.Learn(source, [], "표준(B4)");
+            result.Form.LearnedFrom = [DistributionFile];
             if (Directory.Exists(formDir)) Directory.Delete(formDir, recursive: true);
             result.Save(formDir);
-            session.NewDocument();
             session.Open(Path.Combine(formDir, ExamForm.BaseFile)); // 열리는지 확인
             return result;
         }
@@ -62,18 +95,20 @@ public static class DefaultFormBuilder
         var doc = Hx.Load(zip, Hx.HeaderPart);
         var h = new HeaderInfo(doc);
 
-        int body = 0; // 함초롬바탕 10pt
-        int bold = h.CharVariant(body, bold: true, underline: false);
+        var font = h.AddFont(Font);
+        int body = h.AddCharShape(font, BodyPt);
+        int bold = h.AddCharShape(font, BodyPt, bold: true);
+        h.SetStyleCharShape(0, body); // 바탕글도 본문 글꼴로
         int num = h.AddNumbering((1, "DIGIT", "^1.", bold), (2, "CIRCLED_DIGIT", "^2", null), (3, "HANGUL_JAMO", "^3.", null));
 
         // 선택지 칸 탭: 번호 뒤 글자 폭을 n등분. 탭 위치는 문단 여백이 아니라 단 왼쪽 끝 기준이다(실측).
-        double colMm = Columns.ColumnWidthMm(Page);
-        int text = HwpUnit.FromMm(colMm) - StemHang;
+        int colHu = HwpUnit.FromMm(Columns.ColumnWidthMm(Page));
+        int text = colHu - StemHang;
         int Tabs(int n) => h.AddTabStops([.. Enumerable.Range(1, n - 1).Select(i => StemHang + text * i / n)]);
 
+        // 번호 문단: 번호는 왼쪽 여백 위치, 둘째 줄부터는 번호 뒤 글자 위치(내어쓰기) — 실측
         int pStem = h.AddParaShape(new() { Heading = "NUMBER", NumberingId = num, Level = 0, Indent = -StemHang });
         int pCont = h.AddParaShape(new() { Left = StemHang });
-        // 번호 문단: 한글은 번호를 왼쪽 여백 위치에 두고, 둘째 줄부터는 번호 뒤 글자 위치에 맞춘다(실측).
         int pChoiceAuto = h.AddParaShape(new() { Heading = "NUMBER", NumberingId = num, Level = 1, Left = StemHang, Indent = -ChoiceHang, Align = "LEFT" });
         int pChoice5 = h.AddParaShape(new() { Left = StemHang, Align = "LEFT", TabPr = Tabs(5) });
         int pChoice3 = h.AddParaShape(new() { Left = StemHang, Align = "LEFT", TabPr = Tabs(3) });
@@ -99,29 +134,67 @@ public static class DefaultFormBuilder
         return ids;
     }
 
-    /// <summary>머리 부분과 견본 문항(학습기가 역할별 견본을 뽑을 수 있는 최소 구성).</summary>
-    static void WriteSample(HwpWriter w, StyleIds s)
+    /// <summary>머리 부분(학교 지필평가형)과 견본 문항(학습기가 역할별 견본을 뽑을 수 있는 구성), 꼬리(확인 사항).</summary>
+    static void WriteSample(HwpWriter w, StyleIds s, Action<string> log)
     {
-        double boxMm = Columns.ColumnWidthMm(Page) - StemHang / 100.0 * 0.3528 - 2;
+        double bodyMm = Page.BodyWidthMm - 2;
+        double colMm = Columns.ColumnWidthMm(Page);
+        double boxMm = colMm - StemHang / 100.0 * 0.3528 - 2;
         w.AssumeEmptyParagraph();
         w.PageSetup(Page);
+        log("쪽 설정"); w.PageNumber(); log("쪽 번호");
 
-        // 머리 부분: 시험 정보 자리표시
-        var title = new TextStyle { SizePt = 16, Bold = true };
-        var normal = new TextStyle();
-        w.ParaShape(new ParaStyle { Align = ParaAlign.Center });
-        w.CharShape(title);
+        // ── 머리 부분: 결재란 ──
+        var small = Body.Sized(10);
+        w.ParaShape(new ParaStyle { Align = ParaAlign.Center, LineSpacingPercent = 130 });
+        // 첫 줄: 칸 이름, 둘째 줄: 서명 칸(출제교사 칸에는 "(인)" 자리)
+        w.BeginTable(2, [24, 80, 28, 28, 28, 28]);
+        string[] head = ["출제교사", "", "계", "부 장", "교 감", "교 장"];
+        string[] sign = ["", "(인)                    (인)", "", "", "", ""];
+        for (int i = 0; i < head.Length * 2; i++)
+        {
+            if (i > 0) w.NextCell();
+            w.ParaShape(new ParaStyle { Align = ParaAlign.Center, LineSpacingPercent = 130 });
+            w.CharShape(small);
+            var text = i < head.Length ? head[i] : sign[i - head.Length];
+            if (i >= head.Length) w.BreakPara(); // 서명 칸 높이
+            w.Text(text);
+        }
+        w.ExitTable();
+
+        log("결재란");
+        // ── 시험명·과목 상자 ──
+        w.ParaShape(new ParaStyle { Align = ParaAlign.Center, LineSpacingPercent = 150 });
+        w.BeginTable(1, [bodyMm]);
+        w.ParaShape(new ParaStyle { Align = ParaAlign.Center, LineSpacingPercent = 150 });
+        w.CharShape(Body.With(bold: true).Sized(13));
         w.Text("{{제목}}");
         w.BreakPara();
-        w.CharShape(normal.With(bold: true));
-        w.Text("{{과목}}   {{학년}}   {{일시}}");
+        w.CharShape(Body.With(bold: true).Sized(22));
+        w.Text("{{학년}}  {{과목띄움}}");
         w.BreakPara();
-        w.ParaShape(new ParaStyle { Align = ParaAlign.Right });
-        w.CharShape(normal);
-        w.Text("(    )학년 (    )반 (    )번   이름: (                )");
-        w.BreakPara();
-        w.Columns(Columns);
+        w.CharShape(Body.With(bold: true));
+        w.Text("{{일시}}        {{학교}}   {{학년}} (    )반 (    )번   성명 (                    )");
+        w.ExitTable();
 
+        log("제목 상자"); w.Columns(Columns); log("다단");
+
+        // ── 유의사항 상자(1단 위) ──
+        w.ParaShape(new ParaStyle { Align = ParaAlign.Left });
+        w.BeginTable(1, [colMm - 2]);
+        w.ParaShape(new ParaStyle { Align = ParaAlign.Left, LeftMarginPt = 12, IndentPt = -12, LineSpacingPercent = 140 });
+        w.CharShape(small.With(bold: true));
+        w.Text("※ 답안지에 학년, 반, 번호, 성명을 정확히 표기하시오.");
+        w.BreakPara();
+        w.Text("※ 선택형 문제의 답을 골라 답안지의 해당란에 표기하시오.");
+        w.BreakPara();
+        w.Text("※ 시험지 {{쪽수}}쪽, {{문항수}}문항, {{총점}}점 만점입니다. 문항에 따라 배점이 다릅니다.");
+        w.ExitTable();
+        w.Style(s.Cont);
+        w.BreakPara();
+
+        log("유의사항");
+        // ── 견본 문항 ──
         // 1번: 자료 상자 → 이어지는 발문 → <보기> → 2행(3+2) 선택지
         w.Style(s.Stem);
         w.Text("다음은 어떤 실험 과정을 나타낸 것이다.");
@@ -191,11 +264,19 @@ public static class DefaultFormBuilder
             w.BreakPara();
         }
 
-        // 꼬리
+        log("견본 문항");
+        // ── 꼬리: 확인 사항 ──
         w.Style(s.Cont);
         w.BreakPara();
-        w.Style(s.Figure);
-        w.Text("- 끝 -");
+        w.ParaShape(new ParaStyle { Align = ParaAlign.Left });
+        w.BeginTable(1, [colMm - 2]);
+        w.ParaShape(new ParaStyle { Align = ParaAlign.Left, LineSpacingPercent = 150 });
+        w.CharShape(Body.With(bold: true));
+        w.Text("* 확인 사항");
+        w.BreakPara();
+        w.CharShape(Body);
+        w.Text("답안지의 해당란에 필요한 내용을 정확히 기입(표기)했는지 확인하시오.");
+        w.ExitTable();
     }
 
     static void Choices(HwpWriter w, int style, string[] lines)

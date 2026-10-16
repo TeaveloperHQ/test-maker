@@ -1,45 +1,45 @@
 {
-  "name": "기본",
+  "name": "표준(B4)",
   "learnedFrom": [
-    "내장 표준 양식"
+    "표준 시험지 양식(B4).hwp"
   ],
-  "learnedAt": "2026-10-16T10:17:19.5352355+09:00",
+  "learnedAt": "2026-10-16T10:37:59.8822004+09:00",
   "kind": "Structured",
-  "columnWidthMm": 86,
+  "columnWidthMm": 105.5,
   "stem": {
     "styleName": "문항",
     "styleId": 23,
     "paraPr": 20,
-    "charPr": 0,
+    "charPr": 7,
     "autoNumber": true
   },
   "numberFormat": "{0}. ",
   "stemContinuation": {
     "styleName": "이어지는 발문",
     "styleId": 24,
-    "paraPr": 31,
-    "charPr": 0,
+    "paraPr": 36,
+    "charPr": 7,
     "autoNumber": false
   },
   "groupHeader": {
     "styleName": "묶음 문항",
     "styleId": 33,
     "paraPr": 0,
-    "charPr": 7,
+    "charPr": 8,
     "autoNumber": false
   },
   "figure": {
     "styleName": "그림",
     "styleId": 32,
-    "paraPr": 26,
-    "charPr": 0,
+    "paraPr": 27,
+    "charPr": 7,
     "autoNumber": false
   },
   "spacer": {
     "styleName": "이어지는 발문",
     "styleId": 24,
-    "paraPr": 1,
-    "charPr": 0,
+    "paraPr": 21,
+    "charPr": 7,
     "autoNumber": false
   },
   "spacerLines": 2,
@@ -53,8 +53,8 @@
       "style": {
         "styleName": "선택지 1행(5칸)",
         "styleId": 26,
-        "paraPr": 22,
-        "charPr": 0,
+        "paraPr": 23,
+        "charPr": 7,
         "autoNumber": false
       },
       "auto": false,
@@ -70,8 +70,8 @@
       "style": {
         "styleName": "선택지 2행(3칸)",
         "styleId": 27,
-        "paraPr": 23,
-        "charPr": 0,
+        "paraPr": 24,
+        "charPr": 7,
         "autoNumber": false
       },
       "auto": false,
@@ -88,8 +88,8 @@
       "style": {
         "styleName": "선택지 3행(2칸)",
         "styleId": 28,
-        "paraPr": 24,
-        "charPr": 0,
+        "paraPr": 25,
+        "charPr": 7,
         "autoNumber": false
       },
       "auto": false,
@@ -108,8 +108,8 @@
       "style": {
         "styleName": "선택지 자동번호",
         "styleId": 25,
-        "paraPr": 21,
-        "charPr": 0,
+        "paraPr": 22,
+        "charPr": 7,
         "autoNumber": true
       },
       "auto": true,
@@ -121,8 +121,8 @@
     "line": {
       "styleName": "보기",
       "styleId": 29,
-      "paraPr": 25,
-      "charPr": 0,
+      "paraPr": 26,
+      "charPr": 7,
       "autoNumber": true
     },
     "autoLabels": true
@@ -131,8 +131,8 @@
     "line": {
       "styleName": "자료",
       "styleId": 31,
-      "paraPr": 27,
-      "charPr": 0,
+      "paraPr": 28,
+      "charPr": 7,
       "autoNumber": false
     },
     "autoLabels": false
