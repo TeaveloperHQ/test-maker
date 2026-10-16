@@ -43,7 +43,30 @@ public sealed class ExamForm
     /// <summary>자료 상자 견본(boxes.xml의 passage).</summary>
     public BoxProto? PassageBox { get; set; }
 
+    /// <summary>서술형·논술형 견본. 양식에 없으면 null(발문 모양으로 대신 쓴다).</summary>
+    public EssayProto? Essay { get; set; }
+    /// <summary>&lt;조 건&gt; 상자 견본(boxes.xml의 condition). 없으면 &lt;보기&gt; 상자 견본에 제목만 바꿔 쓴다.</summary>
+    public BoxProto? ConditionBox { get; set; }
+
     public List<string> Notes { get; set; } = [];
+}
+
+/// <summary>서술형·논술형 문항 견본(학교는 보통 선택형과 다른 번호 체계를 쓴다. 예: "논술형 1>").</summary>
+public sealed class EssayProto
+{
+    /// <summary>서술형 발문. AutoNumber면 번호("논술형 1>")가 스타일에서 나온다.</summary>
+    public RoleStyle Stem { get; set; } = new();
+    /// <summary>번호가 스타일에서 나오지 않을 때 직접 쓰는 번호 형식. {0} = 서술형 안에서의 번호.</summary>
+    public string NumberFormat { get; set; } = "서술형 {0}> ";
+    /// <summary>소문항 줄. {0} = 서술형 번호, {1} = 소문항 번호. 예: "2-1. "</summary>
+    public RoleStyle Sub { get; set; } = new();
+    public string SubNumberFormat { get; set; } = "{0}-{1}. ";
+    /// <summary>소문항이 있을 때 발문 끝 배점 형식. 예: "[총 {0}점]"</summary>
+    public string TotalPointsFormat { get; set; } = "[총 {0}점]";
+    /// <summary>답 쓰는 줄 견본(boxes.xml의 answerLine)이 있는지.</summary>
+    public bool HasAnswerLine { get; set; }
+    /// <summary>서술형 구역 머리 상자 견본(boxes.xml의 essayHeader. 예: "논술형 문항")이 있는지.</summary>
+    public bool HasHeader { get; set; }
 }
 
 public enum FormKind { Structured, Unstructured }

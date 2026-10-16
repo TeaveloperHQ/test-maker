@@ -6,7 +6,7 @@ public sealed class Exam
     public ExamInfo Info { get; set; } = new();
     public List<Question> Questions { get; set; } = [];
 
-    public double TotalPoints => Questions.Sum(q => q.Points);
+    public double TotalPoints => Questions.Sum(q => q.TotalPoints);
 }
 
 /// <summary>시험지 머리 정보. 양식(preamble)의 {{키}} 자리표시를 채우는 값이기도 하다.</summary>
@@ -40,6 +40,10 @@ public sealed class ExamInfo
             ["시간"] = DurationMinutes is int m ? $"{m}분" : "",
             ["문항수"] = exam.Questions.Count.ToString(),
             ["총점"] = Format.Points(exam.TotalPoints),
+            ["선택형문항수"] = exam.Questions.Count(q => q.Type != QuestionType.Essay).ToString(),
+            ["선택형배점"] = Format.Points(exam.Questions.Where(q => q.Type != QuestionType.Essay).Sum(q => q.TotalPoints)),
+            ["서술형문항수"] = exam.Questions.Count(q => q.Type == QuestionType.Essay).ToString(),
+            ["서술형배점"] = Format.Points(exam.Questions.Where(q => q.Type == QuestionType.Essay).Sum(q => q.TotalPoints)),
         };
         foreach (var (k, v) in Extra) tokens[k] = v;
         return tokens;
@@ -87,8 +91,17 @@ public sealed class Question
     public string? AnswerText { get; set; }
     public string? Explanation { get; set; }
 
-    /// <summary>서술형 답란의 빈 줄 수.</summary>
-    public int AnswerLines { get; set; } = 4;
+    /// <summary>서술형 답란 줄 수(양식에 "∘ ____" 같은 답 줄 견본이 있으면 그 줄을, 없으면 빈 줄을 넣는다).</summary>
+    public int AnswerLines { get; set; } = 1;
+
+    /// <summary>서술형 &lt;조 건&gt; 상자. 제목은 Title(기본 "&lt;조 건&gt;").</summary>
+    public BoxContent? Conditions { get; set; }
+    /// <summary>서술형 소문항(2-1, 2-2 …). 있으면 발문 배점은 "[총 n점]"으로 쓴다.</summary>
+    public List<SubQuestion> SubQuestions { get; set; } = [];
+
+    /// <summary>문항 배점: 소문항이 있으면 소문항 배점의 합.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public double TotalPoints => SubQuestions.Count > 0 ? SubQuestions.Sum(s => s.Points) : Points;
 
     public QuestionMeta Meta { get; set; } = new();
 }
@@ -99,6 +112,13 @@ public sealed class BoxContent
     public string Title { get; set; } = "<보기>";
     /// <summary>상자 안 줄들. 예: "ㄱ. …", "ㄴ. …"</summary>
     public List<string> Lines { get; set; } = [];
+}
+
+public sealed class SubQuestion
+{
+    public string Text { get; set; } = "";
+    public double Points { get; set; }
+    public string? AnswerText { get; set; }
 }
 
 public sealed class GroupIntro

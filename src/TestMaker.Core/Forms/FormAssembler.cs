@@ -102,14 +102,28 @@ public sealed class FormAssembler
 
     // ── 문항 ─────────────────────────────────────────────────
 
+    /// <summary>
+    /// 문항 번호는 두 갈래로 센다: 선택형·단답형은 학교 문항 번호(1. 2. …), 서술형은 서술형 번호(서술형 1> …).
+    /// 학교 양식에 서술형 견본이 있으면 서술형은 그 번호 체계·스타일로, 첫 서술형 앞에는 구역 머리("논술형 문항")를 넣는다.
+    /// </summary>
     List<XElement> Questions(Exam exam)
     {
         var list = new List<XElement>();
+        int n = 0, essayNo = 0;
         for (int i = 0; i < exam.Questions.Count; i++)
         {
-            int n = i + 1;
             var q = exam.Questions[i];
+            bool essay = q.Type == QuestionType.Essay;
             if (i > 0) for (int s = 0; s < form.SpacerLines; s++) list.Add(Empty(form.Spacer));
+            if (essay && essayNo == 0 && form.Essay?.HasHeader == true && boxes.Element("essayHeader")?.Element(Hp + "p") is { } head)
+            {
+                var h = new XElement(head);
+                if (Table(h) is { } t) t.SetAttributeValue("id", Random.Shared.Next(100_000_000, int.MaxValue));
+                list.Add(h);
+                list.Add(Empty(form.Spacer));
+            }
+            // 서술형 견본이 있는 양식만 서술형 번호를 따로 센다. 없으면 선택형 번호에 이어서 쓴다.
+            if (essay && form.Essay is not null) essayNo++; else n++;
 
             if (q.Group is { } g)
             {
@@ -118,12 +132,18 @@ public sealed class FormAssembler
                 if (g.Image is not null) list.Add(Figure(g.Image));
             }
 
+            // 발문
+            var stemStyle = essay && form.Essay is { } ep ? ep.Stem : form.Stem;
             bool pointsOnFirst = string.IsNullOrWhiteSpace(q.StemAfter);
             var stemRuns = new List<XElement>();
-            if (!form.Stem.AutoNumber) stemRuns.Add(Run(header.CharVariant(form.Stem.CharPr, true, false), [string.Format(form.NumberFormat, n)]));
-            stemRuns.AddRange(Rich(q.Stem, form.Stem.CharPr));
-            if (pointsOnFirst) stemRuns.AddRange(Points(q, form.Stem.CharPr));
-            list.Add(Para(form.Stem, stemRuns));
+            if (!stemStyle.AutoNumber)
+            {
+                var number = essay && form.Essay is not null ? string.Format(form.Essay.NumberFormat, essayNo) : string.Format(form.NumberFormat, n);
+                stemRuns.Add(Run(header.CharVariant(stemStyle.CharPr, true, false), [number]));
+            }
+            stemRuns.AddRange(Rich(q.Stem, stemStyle.CharPr));
+            if (pointsOnFirst) stemRuns.AddRange(Points(q, stemStyle.CharPr));
+            list.Add(Para(stemStyle, stemRuns));
 
             if (q.Image is not null) list.Add(Figure(q.Image));
             if (q.Passage is not null) list.Add(BoxPara("passage", form.PassageBox, q.Passage, labels: false));
@@ -134,7 +154,7 @@ public sealed class FormAssembler
             switch (q.Type)
             {
                 case QuestionType.MultipleChoice: list.AddRange(Choices(q)); break;
-                case QuestionType.Essay: for (int l = 0; l < q.AnswerLines; l++) list.Add(Empty(form.Spacer)); break;
+                case QuestionType.Essay: list.AddRange(EssayBody(q, form.Essay is not null ? essayNo : n)); break;
             }
         }
         // 꼬리(확인 사항 상자 등)와 마지막 문항 사이도 문항 간격만큼 띄운다.
@@ -142,8 +162,51 @@ public sealed class FormAssembler
         return list;
     }
 
-    IEnumerable<XElement> Points(Question q, int charPr) =>
-        form.PointsFormat.Length == 0 ? [] : [Run(charPr, [" " + string.Format(form.PointsFormat, Format.Points(q.Points))])];
+    /// <summary>발문 끝 배점. 소문항이 있으면 "[총 n점]".</summary>
+    IEnumerable<XElement> Points(Question q, int charPr)
+    {
+        if (form.PointsFormat.Length == 0) return [];
+        var fmt = q.SubQuestions.Count > 0 ? form.Essay?.TotalPointsFormat ?? "[총 {0}점]" : form.PointsFormat;
+        return [Run(charPr, [" " + string.Format(fmt, Format.Points(q.TotalPoints))])];
+    }
+
+    /// <summary>서술형: &lt;조 건&gt; 상자 → 소문항 → 답 줄(견본이 있으면 그 줄, 없으면 빈 줄).</summary>
+    IEnumerable<XElement> EssayBody(Question q, int essayNo)
+    {
+        if (q.Conditions is { } cond)
+        {
+            if (form.ConditionBox is not null) yield return BoxPara("condition", form.ConditionBox, cond, labels: false);
+            else
+            {
+                // <보기> 견본을 빌린다: 줄의 ㄱ.ㄴ.ㄷ. 자동번호는 떼고, 제목은 <조 건>으로.
+                BoxProto? borrowed = null;
+                if (form.ViewBox is { } v)
+                {
+                    var plain = v.Line.Clone();
+                    plain.ParaPr = header.Unnumbered(v.Line.ParaPr);
+                    plain.AutoNumber = false;
+                    borrowed = new BoxProto { Line = plain, AutoLabels = false };
+                }
+                yield return BoxPara("view", borrowed, cond, labels: false,
+                    titleOverride: string.IsNullOrEmpty(cond.Title) || cond.Title == "<보기>" ? "<조 건>" : cond.Title);
+            }
+        }
+
+        var sub = form.Essay?.Sub ?? form.StemContinuation;
+        var subFmt = form.Essay?.SubNumberFormat ?? "{0}-{1}. ";
+        for (int k = 0; k < q.SubQuestions.Count; k++)
+        {
+            var s = q.SubQuestions[k];
+            var runs = new List<XElement> { Run(sub.CharPr, [string.Format(subFmt, essayNo, k + 1)]) };
+            runs.AddRange(Rich(s.Text, sub.CharPr));
+            if (form.PointsFormat.Length > 0) runs.Add(Run(sub.CharPr, [" " + string.Format(form.PointsFormat, Format.Points(s.Points))]));
+            yield return Para(sub, runs);
+        }
+
+        var line = form.Essay?.HasAnswerLine == true ? boxes.Element("answerLine")?.Element(Hp + "p") : null;
+        for (int l = 0; l < q.AnswerLines; l++)
+            yield return line is not null ? new XElement(line) : Empty(form.Spacer);
+    }
 
     // ── 선택지 ───────────────────────────────────────────────
 
@@ -226,7 +289,8 @@ public sealed class FormAssembler
 
     // ── 상자 ─────────────────────────────────────────────────
 
-    XElement BoxPara(string key, BoxProto? proto, BoxContent content, bool labels)
+    /// <param name="titleOverride">다른 상자 견본을 빌려 쓸 때 제목 칸 글(예: &lt;보기&gt; 견본으로 &lt;조 건&gt; 상자).</param>
+    XElement BoxPara(string key, BoxProto? proto, BoxContent content, bool labels, string? titleOverride = null)
     {
         var lines = content.Lines.Select((l, i) => (Text: l, Index: i)).ToList();
         string Line(string text, int i, bool auto) => !labels ? text
@@ -254,6 +318,17 @@ public sealed class FormAssembler
         foreach (var (t, i) in lines)
             sub.Add(Para(proto.Line, Rich(Line(t, i, proto.AutoLabels), proto.Line.CharPr)));
         if (lines.Count == 0) sub.Add(Para(proto.Line, [EmptyRun(proto.Line.CharPr)]));
+        if (titleOverride is not null)
+        {
+            // 내용 칸이 아닌 칸 중 글이 있는 칸이 제목 칸
+            var title = tbl.Descendants(Hp + "tc").FirstOrDefault(tc => tc != cell && DeepText(tc).Trim().Length > 0);
+            var ts = title?.Descendants(Hp + "t").ToList() ?? [];
+            if (ts.Count > 0)
+            {
+                ts[0].Value = titleOverride;
+                foreach (var extra in ts.Skip(1)) extra.Value = "";
+            }
+        }
         ShrinkRow(tbl, cell);
         return para;
     }

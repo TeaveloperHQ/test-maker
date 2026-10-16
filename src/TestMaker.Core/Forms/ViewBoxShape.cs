@@ -20,9 +20,9 @@ public static class ViewBoxShape
     const int Row1 = 440;          // 2행(선 아래쪽) 높이 — 제목 칸 높이 = Row0 + Row1
     const string Line = "0.12 mm";
 
-    /// <summary>문서에서 첫 줄에 "보기"가 있는 표를 찾는다(띄어쓰기 무시).</summary>
-    public static XElement? Find(XDocument section) => section.Descendants(Hp + "tbl").FirstOrDefault(t =>
-        t.Elements(Hp + "tr").FirstOrDefault() is { } tr && Regex.Replace(DeepText(tr), @"\s+", "").Contains("보기"));
+    /// <summary>문서에서 첫 줄에 제목(기본 "보기", 예: "조건")이 있는 표를 찾는다(띄어쓰기 무시).</summary>
+    public static XElement? Find(XDocument section, string title = "보기") => section.Descendants(Hp + "tbl").FirstOrDefault(t =>
+        t.Elements(Hp + "tr").FirstOrDefault() is { } tr && Regex.Replace(DeepText(tr), @"\s+", "").Contains(title));
 
     /// <summary>
     /// "제목 줄 + 내용 줄" 2행 표를 윗선 제목 모양의 3×3 표로 바꾼다. 제목·내용 문단은 그대로 옮긴다.

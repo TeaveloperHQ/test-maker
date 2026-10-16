@@ -3,7 +3,7 @@
   "learnedFrom": [
     "표준 시험지 양식(B4).hwp"
   ],
-  "learnedAt": "2026-10-16T14:13:53.5446363+09:00",
+  "learnedAt": "2026-10-16T14:25:46.193179+09:00",
   "kind": "Structured",
   "columnWidthMm": 105.5,
   "stem": {
@@ -17,7 +17,7 @@
   "stemContinuation": {
     "styleName": "이어지는 발문",
     "styleId": 24,
-    "paraPr": 34,
+    "paraPr": 37,
     "charPr": 7,
     "autoNumber": false
   },
@@ -137,5 +137,38 @@
     },
     "autoLabels": false
   },
-  "notes": []
+  "essay": {
+    "stem": {
+      "styleName": "서술형 문항",
+      "styleId": 34,
+      "paraPr": 29,
+      "charPr": 7,
+      "autoNumber": true
+    },
+    "numberFormat": "서술형 {0}\u003E ",
+    "sub": {
+      "styleName": "서술형 소문항",
+      "styleId": 35,
+      "paraPr": 30,
+      "charPr": 7,
+      "autoNumber": false
+    },
+    "subNumberFormat": "{0}-{1}. ",
+    "totalPointsFormat": "[총 {0}점]",
+    "hasAnswerLine": true,
+    "hasHeader": true
+  },
+  "conditionBox": {
+    "line": {
+      "styleName": "조건",
+      "styleId": 36,
+      "paraPr": 28,
+      "charPr": 7,
+      "autoNumber": false
+    },
+    "autoLabels": false
+  },
+  "notes": [
+    "서술형: 번호 \u0022서술형 ^1\u003E\u0022, \u003C조건\u003E 상자, 답 줄, 구역 머리"
+  ]
 }

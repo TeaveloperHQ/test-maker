@@ -121,6 +121,37 @@ public sealed class FormLearnerTests : IDisposable
         Assert.Equal(exam.Questions.Count(q => q.Type == QuestionType.MultipleChoice), Count(original, "markpenBegin"));
     }
 
+    /// <summary>내장 표준 양식으로 서술형(조건·소문항) 조립: 서술형 번호는 스타일이, 소문항 번호는 "2-1." 형식으로.</summary>
+    [Fact]
+    public void Assembles_essay_section_with_standard_form()
+    {
+        var formDir = Path.Combine(AppContext.BaseDirectory, "forms", "default");
+        var form = Serialization(formDir);
+        var exam = new Exam
+        {
+            Info = new ExamInfo { Title = "시험", Subject = "과학" },
+            Questions =
+            [
+                new Question { Stem = "옳은 것은?", Points = 4, Choices = ["가", "나", "다", "라", "마"], Answer = [1] },
+                new Question { Type = QuestionType.Essay, Stem = "까닭을 서술하시오.", Points = 3,
+                    Conditions = new BoxContent { Title = "<조 건>", Lines = ["∘ 한 문장으로 쓸 것"] } },
+                new Question { Type = QuestionType.Essay, Stem = "물음에 답하시오.",
+                    SubQuestions = [new SubQuestion { Text = "첫째 물음", Points = 2 }, new SubQuestion { Text = "둘째 물음", Points = 3 }] },
+            ],
+        };
+        var output = Path.Combine(dir, "essay.hwpx");
+        FormAssembler.Assemble(exam, form, formDir, null, output, original: false);
+
+        var text = AllText(output);
+        Assert.Contains("서술형 문항", text);              // 구역 머리
+        Assert.Contains("까닭을 서술하시오. [3점]", text);
+        Assert.DoesNotContain("서술형 1>", text);          // 번호는 스타일(문단번호)이 붙임
+        Assert.Contains("∘ 한 문장으로 쓸 것", text);      // <조 건> 상자 줄
+        Assert.Contains("물음에 답하시오. [총 5점]", text);
+        Assert.Contains("2-1. 첫째 물음 [2점]", text);
+        Assert.Contains("2-2. 둘째 물음 [3점]", text);
+    }
+
     static ExamForm Serialization(string formDir) =>
         TestMaker.Core.Serialization.JsonStore.Load<ExamForm>(Path.Combine(formDir, ExamForm.FileName));
 

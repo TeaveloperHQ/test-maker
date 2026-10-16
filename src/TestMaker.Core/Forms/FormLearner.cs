@@ -121,6 +121,9 @@ public static class FormLearner
         if (form.ViewBox is null) notes.Add("<보기> 상자 견본이 없어 <보기>는 글줄로만 넣습니다.");
         if (form.PassageBox is null) notes.Add("자료 상자 견본이 없어 자료는 글줄로만 넣습니다.");
 
+        // 서술형·논술형
+        (form.Essay, form.ConditionBox) = LearnEssay(primary, info, boxes, notes);
+
         form.ColumnWidthMm = ColumnWidth(primary.Paras, primary.Stems[0]);
 
         var (baseSection, preambleText) = BuildBase(section, primary);
@@ -152,6 +155,8 @@ public static class FormLearner
         public required HeaderInfo Header { get; init; }
         public List<int> Stems { get; } = [];
         public List<int> Groups { get; } = [];
+        /// <summary>선택형과 다른 번호 체계로 시작하는 문단(서술형·논술형 발문 등)</summary>
+        public List<int> OtherStarts { get; } = [];
         public List<Cls> Items { get; } = [];
         /// <summary>선택지 묶음(연속된 선택지 문단 번호들)</summary>
         public List<List<int>> ChoiceGroups { get; } = [];
@@ -189,7 +194,7 @@ public static class FormLearner
             if (h.IsNumbered && h.Level == 0 && t.Length > 0 && !Circled.IsMatch(t[..1])) numbered.Add((i, h));
         }
         var main = numbered.GroupBy(x => (x.H.Type, x.H.NumberingId)).OrderByDescending(g => g.Count()).FirstOrDefault();
-        var otherStarts = new List<int>();
+        var otherStarts = a.OtherStarts;
         if (main is not null)
         {
             a.Stems.AddRange(main.Select(x => x.Index));
@@ -461,6 +466,116 @@ public static class FormLearner
         .ThenByDescending(tc => Attr(tc.Element(Hp + "cellSz") ?? tc, "height"))
         .First();
 
+    // ── 서술형·논술형 ────────────────────────────────────────
+
+    static readonly Regex EssayNumberRx = new("서술|논술", RegexOptions.Compiled);
+    static readonly Regex SubRx = new(@"^\s*\d+\s*-\s*\d+\s*\.", RegexOptions.Compiled);
+    static readonly Regex TotalPointsRx = new(@"([\[\(（])\s*총\s*\d+(?:\.\d+)?\s*점\s*([\]\)）])", RegexOptions.Compiled);
+
+    /// <summary>
+    /// 선택형과 다른 번호 체계 중 번호 모양에 "서술"·"논술"이 든 문단을 서술형 발문으로 보고,
+    /// 그 문항 안의 &lt;조 건&gt; 상자, 소문항("2-1."), 답 쓰는 줄("∘ ___"), 그리고 첫 서술형 앞의
+    /// 구역 머리 상자("논술형 문항")를 견본으로 배운다.
+    /// </summary>
+    static (EssayProto?, BoxProto?) LearnEssay(Analysis a, HeaderInfo info, XElement boxes, List<string> notes)
+    {
+        var starts = a.OtherStarts.Where(i =>
+        {
+            var h = info.HeadingOf(Attr(a.Paras[i], "paraPrIDRef"));
+            return EssayNumberRx.IsMatch(info.NumberingText(h.NumberingId, h.Level));
+        }).ToList();
+        if (starts.Count == 0) return (null, null);
+
+        var stemCls = starts.Select(i => (Style: Attr(a.Paras[i], "styleIDRef"), ParaPr: Attr(a.Paras[i], "paraPrIDRef"), CharPr: FirstCharPr(a.Paras[i])))
+            .GroupBy(x => x).OrderByDescending(g => g.Count()).First().Key;
+        var essay = new EssayProto
+        {
+            Stem = new RoleStyle { StyleId = stemCls.Style, StyleName = info.StyleName(stemCls.Style), ParaPr = stemCls.ParaPr, CharPr = stemCls.CharPr, AutoNumber = true },
+        };
+        essay.Sub = new RoleStyle { StyleId = stemCls.Style, StyleName = info.StyleName(stemCls.Style), ParaPr = info.ParaVariant(stemCls.ParaPr, true, true, null), CharPr = stemCls.CharPr };
+        BoxProto? condition = null;
+
+        var boundaries = a.Stems.Concat(a.Groups).Concat(a.OtherStarts).Order().ToList();
+        foreach (var s in starts)
+        {
+            if (TotalPointsRx.Match(a.Text[s]) is { Success: true } tp) essay.TotalPointsFormat = $"{tp.Groups[1].Value}총 {{0}}점{tp.Groups[2].Value}";
+            int e = boundaries.FirstOrDefault(b => b > s, a.Paras.Count);
+            for (int i = s + 1; i < e; i++)
+            {
+                var t = a.Text[i].Trim();
+                if (Table(a.Paras[i]) is { } tbl)
+                {
+                    if (condition is null && Regex.Replace(DeepText(tbl.Elements(Hp + "tr").First()), @"\s+", "").Contains("조건"))
+                        condition = BoxFromParagraph(a.Paras[i], "condition", boxes, info, auto: false);
+                    continue;
+                }
+                if (SubRx.IsMatch(t))
+                {
+                    // 학교는 소문항을 공백으로 들여 쓰는 경우가 많다(왼쪽 여백 0) → 번호를 떼고 발문 글자 위치에 맞춘다.
+                    // 소문항 문단 모양에 여백이 이미 있으면(잘 만든 양식) 그대로 쓴다.
+                    int subPp = info.ParaVariant(Attr(a.Paras[i], "paraPrIDRef"), true, false, null);
+                    if (info.MarginHu(subPp, "left") == 0) subPp = info.AlignUnder(subPp, stemCls.ParaPr);
+                    essay.Sub = new RoleStyle { StyleId = Attr(a.Paras[i], "styleIDRef"), StyleName = info.StyleName(Attr(a.Paras[i], "styleIDRef")),
+                        ParaPr = subPp, CharPr = FirstCharPr(a.Paras[i]) };
+                }
+                else if (!essay.HasAnswerLine && t.StartsWith('∘') && t.Length <= 3)
+                {
+                    var line = new XElement(a.Paras[i]);
+                    StripLayout(line);
+                    boxes.Add(new XElement("answerLine", line));
+                    essay.HasAnswerLine = true;
+                }
+            }
+        }
+
+        // 구역 머리 상자: 첫 서술형 앞쪽(가까운 것부터)에서 "서술형/논술형" 글이 든 표 문단
+        for (int i = starts[0] - 1; i >= 0 && i > (a.Stems.Count > 0 ? a.Stems[^1] : -1); i--)
+        {
+            if (Table(a.Paras[i]) is { } tbl && EssayNumberRx.IsMatch(DeepText(tbl)))
+            {
+                var head = new XElement(a.Paras[i]);
+                // 머리말 등 컨트롤은 견본에 넣지 않는다(이미 머리 부분으로 옮겨 둠)
+                foreach (var ctrl in head.Elements(Hp + "run").Elements(Hp + "ctrl").ToList()) ctrl.Remove();
+                StripLayout(head);
+                boxes.Add(new XElement("essayHeader", head));
+                essay.HasHeader = true;
+                break;
+            }
+        }
+
+        notes.Add($"서술형: 번호 \"{info.NumberingText(info.HeadingOf(stemCls.ParaPr).NumberingId, info.HeadingOf(stemCls.ParaPr).Level)}\"" +
+                  $"{(condition is not null ? ", <조건> 상자" : "")}{(essay.HasAnswerLine ? ", 답 줄" : "")}{(essay.HasHeader ? ", 구역 머리" : "")}");
+        return (essay, condition);
+    }
+
+    static int FirstCharPr(XElement p)
+    {
+        var run = p.Elements(Hp + "run").FirstOrDefault(r => r.Elements(Hp + "t").Any(t => t.Value.Length > 0)) ?? p.Elements(Hp + "run").FirstOrDefault();
+        return run is null ? 0 : Attr(run, "charPrIDRef");
+    }
+
+    /// <summary>표 문단 하나를 상자 견본으로 저장하고, 내용 줄 모양을 돌려준다.</summary>
+    static BoxProto BoxFromParagraph(XElement source, string key, XElement boxes, HeaderInfo info, bool auto)
+    {
+        var para = new XElement(source);
+        StripLayout(para);
+        var line = ContentCell(Table(para)!).Descendants(Hp + "p").First();
+        int pp = Attr(line, "paraPrIDRef");
+        bool numbered = info.HeadingOf(pp).IsNumbered && auto;
+        boxes.Add(new XElement(key, para));
+        return new BoxProto
+        {
+            AutoLabels = numbered,
+            Line = new RoleStyle
+            {
+                StyleId = Attr(line, "styleIDRef"),
+                StyleName = info.StyleName(Attr(line, "styleIDRef")),
+                ParaPr = numbered ? pp : info.ParaVariant(pp, unnumber: true, resetIndent: false, align: null),
+                CharPr = FirstCharPr(line),
+            },
+        };
+    }
+
     // ── 배점, 단 폭 ──────────────────────────────────────────
 
     static string? LearnPointsFormat(IEnumerable<Analysis> docs) => docs
@@ -507,6 +622,9 @@ public static class FormLearner
 
     static readonly string[] Subjects =
         ["국어", "영어", "수학", "과학", "사회", "역사", "도덕", "기술", "가정", "기술가정", "정보", "음악", "미술", "체육", "한문", "일본어", "중국어", "생활과학"];
+    /// <summary>색 글씨 "논술형 2문항(10점)" 같은 서술형 문항 수·배점 칸</summary>
+    static readonly Regex EssayCountRx = new(@"(서술형|논술형)\s*\d*\s*문항\s*\(\s*\d*\s*점\s*\)", RegexOptions.Compiled);
+
     static readonly (Regex Rx, string Token)[] TextTokens =
     [
         (new(@"\d{4}학년도\s*\d\s*학기\s*\d\s*차\s*지필평가"), "{{제목}}"),
@@ -536,7 +654,10 @@ public static class FormLearner
                 {
                     var compact = Regex.Replace(text, @"\s+", "");
                     if (Regex.IsMatch(text, @"^\s*\d*\s*$") && before.TrimEnd().EndsWith("시험지")) replaced = "{{쪽수}}";
-                    else if (Regex.IsMatch(text, @"^\s*\d*\s*$") && before.TrimEnd().EndsWith("선택형")) replaced = "{{문항수}}";
+                    else if (Regex.IsMatch(text, @"^\s*\d*\s*$") && before.TrimEnd().EndsWith("선택형")) replaced = "{{선택형문항수}}";
+                    else if (Regex.IsMatch(text, @"^\s*\(\s*\d*\s*점\s*\)\s*$") && Regex.IsMatch(before, @"선택형\s*\S*\s*문항\s*$")) replaced = "({{선택형배점}}점)";
+                    else if (EssayCountRx.Match(text) is { Success: true } ec)
+                        replaced = text.Replace(ec.Value, $"{ec.Groups[1].Value} {{{{서술형문항수}}}}문항({{{{서술형배점}}}}점)");
                     else if (Regex.IsMatch(text, @"^\s*\[\s*\d*\s*쪽\s*$")) replaced = "[{{쪽수}}쪽";
                     else if (Regex.IsMatch(text, @"^\s*\d*\s*쪽\s*$") && before.TrimEnd().EndsWith('[')) replaced = "{{쪽수}}쪽";
                     else if (Subjects.Contains(compact)) replaced = compact.Length < text.Trim().Length ? "{{과목띄움}}" : "{{과목}}";

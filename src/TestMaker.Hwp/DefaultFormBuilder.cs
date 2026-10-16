@@ -30,6 +30,8 @@ public static class DefaultFormBuilder
     const int StemHang = 1650;    // 문항 번호 자리(11pt 글자 "10." 너비 정도)
     const int ChoiceHang = 1400;  // ① 자리
     const int ViewHang = 1650;    // ㄱ. 자리
+    const int EssayHang = 5200;   // "서술형 1>" 자리
+    const int SubHang = 2600;     // "2-1." 자리
 
     static readonly TextStyle Body = new() { FontHangul = Font, FontLatin = Font, SizePt = BodyPt };
 
@@ -104,6 +106,14 @@ public static class DefaultFormBuilder
         StyleBoxParagraphs(section, info, ids);
         var tbl = ViewBoxShape.Find(section) ?? throw new InvalidOperationException("견본의 <보기> 상자를 찾지 못했습니다.");
         ViewBoxShape.Apply(tbl, info);
+        // <조 건> 상자도 같은 모양으로, 서술형 발문 글자 위치에 맞춘다.
+        var cond = ViewBoxShape.Find(section, "조건") ?? throw new InvalidOperationException("견본의 <조 건> 상자를 찾지 못했습니다.");
+        ViewBoxShape.Apply(cond, info);
+        var condPara = cond.Ancestors(Hx.Hp + "p").Last();
+        var contStyle = info.Style(ids.Cont)!;
+        condPara.SetAttributeValue("styleIDRef", ids.Cont);
+        condPara.SetAttributeValue("paraPrIDRef", Hx.Attr(contStyle, "paraPrIDRef"));
+        cond.Element(Hx.Hp + "pos")?.SetAttributeValue("horzRelTo", "PARA");
         Hx.Replace(zip, Hx.HeaderPart, header);
         Hx.Replace(zip, Hx.SectionPart, section);
     }
@@ -131,7 +141,8 @@ public static class DefaultFormBuilder
         }
     }
 
-    sealed record StyleIds(int Stem, int Cont, int ChoiceAuto, int Choice5, int Choice3, int Choice2, int View, int ViewTitle, int Passage, int Figure, int Group);
+    sealed record StyleIds(int Stem, int Cont, int ChoiceAuto, int Choice5, int Choice3, int Choice2, int View, int ViewTitle, int Passage, int Figure, int Group,
+        int Essay, int EssaySub, int Condition, int AnswerLine);
 
     static StyleIds AddStyles(string hwpx)
     {
@@ -162,6 +173,13 @@ public static class DefaultFormBuilder
         int pPassage = h.AddParaShape(new() { LineSpacing = 150 });
         int pGroup = h.AddParaShape(new() { });
 
+        // 서술형: 선택형과 다른 번호 체계("서술형 1>"), 소문항(2-1.), <조 건> 줄, 답 쓰는 줄(단 끝까지 밑줄 탭)
+        int essayNum = h.AddNumbering((1, "DIGIT", "서술형 ^1>", bold));
+        int pEssay = h.AddParaShape(new() { Heading = "NUMBER", NumberingId = essayNum, Level = 0, Indent = -EssayHang });
+        int pEssaySub = h.AddParaShape(new() { Left = StemHang + SubHang, Indent = -SubHang });
+        int pCondition = h.AddParaShape(new() { LineSpacing = 150 });
+        int pAnswer = h.AddParaShape(new() { Left = StemHang, Align = "LEFT", TabPr = h.AddTabStop(colHu - 200, "RIGHT", "SOLID") });
+
         var ids = new StyleIds(
             Stem: h.AddStyle("문항", pStem, body),
             Cont: h.AddStyle("이어지는 발문", pCont, body),
@@ -173,7 +191,11 @@ public static class DefaultFormBuilder
             ViewTitle: h.AddStyle("보기 제목", pCenter, body),
             Passage: h.AddStyle("자료", pPassage, body),
             Figure: h.AddStyle("그림", pCenter, body),
-            Group: h.AddStyle("묶음 문항", pGroup, bold));
+            Group: h.AddStyle("묶음 문항", pGroup, bold),
+            Essay: h.AddStyle("서술형 문항", pEssay, body),
+            EssaySub: h.AddStyle("서술형 소문항", pEssaySub, body),
+            Condition: h.AddStyle("조건", pCondition, body),
+            AnswerLine: h.AddStyle("답 쓰는 줄", pAnswer, body));
         Hx.Replace(zip, Hx.HeaderPart, doc);
         return ids;
     }
@@ -308,6 +330,45 @@ public static class DefaultFormBuilder
             w.Text(c);
             w.BreakPara();
         }
+        Gap(w, s);
+
+        // ── 서술형 구역: 머리 상자 → 서술형 1>(<조 건> + 답 줄) → 서술형 2>(소문항) ──
+        w.ParaShape(new ParaStyle { Align = ParaAlign.Center });
+        w.BeginTable(1, [60]);
+        w.ParaShape(new ParaStyle { Align = ParaAlign.Center, LineSpacingPercent = 160 });
+        w.CharShape(Body.Sized(13));
+        w.Text("서술형 문항");
+        w.ExitTable();
+        Gap(w, s);
+
+        Tag(w, s.Essay);
+        w.Text("다음 현상의 까닭을 <조건>에 맞추어 서술하시오. [4점]");
+        w.BreakPara();
+        w.BeginTable(2, [boxMm]);
+        Tag(w, s.ViewTitle);
+        w.Text("<조 건>");
+        w.NextCell();
+        Tag(w, s.Condition);
+        w.Text("∘ 첫째 조건");
+        w.BreakPara();
+        Tag(w, s.Condition);
+        w.Text("∘ 둘째 조건");
+        w.ExitTable();
+        Tag(w, s.AnswerLine);
+        w.Text("∘");
+        w.Run("InsertTab");
+        w.BreakPara();
+        Gap(w, s);
+
+        Tag(w, s.Essay);
+        w.Text("다음 물음에 답하시오. [총 6점]");
+        w.BreakPara();
+        Tag(w, s.EssaySub);
+        w.Text("2-1. 첫째 물음 [2점]");
+        w.BreakPara();
+        Tag(w, s.EssaySub);
+        w.Text("2-2. 둘째 물음 [4점]");
+        w.BreakPara();
 
         log("견본 문항");
         // ── 꼬리: 확인 사항 ──

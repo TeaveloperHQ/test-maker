@@ -30,7 +30,7 @@ public sealed class AnswerSheetRenderer(HwpSession session)
         for (int i = 0; i < exam.Questions.Count; i++)
         {
             var q = exam.Questions[i];
-            Row([(i + 1).ToString(), TypeName(q.Type), AnswerOf(q), Format.Points(q.Points)], bold: false, first: false);
+            Row([(i + 1).ToString(), TypeName(q.Type), AnswerOf(q), Format.Points(q.TotalPoints)], bold: false, first: false);
         }
         Row(["", "", "합계", Format.Points(exam.TotalPoints)], bold: true, first: false);
         w.ExitTable();
@@ -73,7 +73,9 @@ public sealed class AnswerSheetRenderer(HwpSession session)
 
     static string AnswerOf(Question q) => q.Type == QuestionType.MultipleChoice
         ? string.Join(", ", q.Answer.Select(Format.ChoiceMark))
-        : q.AnswerText ?? "";
+        : q.SubQuestions.Count > 0
+            ? string.Join("\n", q.SubQuestions.Select((s, k) => $"({k + 1}) {s.AnswerText} [{Format.Points(s.Points)}점]"))
+            : q.AnswerText ?? "";
 }
 
 static class TextStyleExtensions

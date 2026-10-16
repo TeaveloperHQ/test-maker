@@ -57,6 +57,12 @@ public sealed class JsonStoreTests : IDisposable
         Assert.True(f.ChoiceLayouts.Single(l => l.Lines == 5).Auto);
         Assert.True(f.ViewBox?.AutoLabels);
         Assert.NotNull(f.PassageBox);
+        // 서술형 구역: 별도 번호 체계, 구역 머리, 답 줄, <조 건> 상자
+        Assert.NotNull(f.Essay);
+        Assert.True(f.Essay!.Stem.AutoNumber);
+        Assert.True(f.Essay.HasHeader);
+        Assert.True(f.Essay.HasAnswerLine);
+        Assert.NotNull(f.ConditionBox);
     }
 
     [Fact]

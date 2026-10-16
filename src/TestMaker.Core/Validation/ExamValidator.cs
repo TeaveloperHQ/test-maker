@@ -28,7 +28,12 @@ public static class ExamValidator
             void Warn(string m) => issues.Add(new(Severity.Warning, n, m));
 
             if (string.IsNullOrWhiteSpace(q.Stem)) Err("발문이 비어 있습니다.");
-            if (q.Points <= 0) Err("배점이 0 이하입니다.");
+            if (q.TotalPoints <= 0) Err("배점이 0 이하입니다.");
+            if (q.SubQuestions.Any(s => s.Points <= 0)) Err("배점이 0 이하인 소문항이 있습니다.");
+            if (q.SubQuestions.Count > 0 && q.Points > 0 && Math.Abs(q.Points - q.TotalPoints) > 1e-9)
+                Warn($"문항 배점({Format.Points(q.Points)})과 소문항 배점 합({Format.Points(q.TotalPoints)})이 다릅니다. 소문항 합을 씁니다.");
+            if (q.Type == QuestionType.MultipleChoice && (q.SubQuestions.Count > 0 || q.Conditions is not null))
+                Warn("선택형 문항에 소문항이나 <조건>이 있습니다. 서술형(Essay)으로 바꾸세요.");
 
             foreach (var text in AllText(q))
             {
@@ -49,7 +54,9 @@ public static class ExamValidator
             else
             {
                 if (q.Choices.Count > 0) Warn("선택형이 아닌데 선택지가 있습니다. 출력되지 않습니다.");
-                if (string.IsNullOrWhiteSpace(q.AnswerText)) Warn("모범 답안이 없습니다.");
+                bool hasAnswer = !string.IsNullOrWhiteSpace(q.AnswerText)
+                    || (q.SubQuestions.Count > 0 && q.SubQuestions.All(s => !string.IsNullOrWhiteSpace(s.AnswerText)));
+                if (!hasAnswer) Warn("모범 답안이 없습니다.");
             }
 
             if (q.Image is { } img && string.IsNullOrWhiteSpace(img.Path)) Err("그림 경로가 비어 있습니다.");
@@ -69,5 +76,7 @@ public static class ExamValidator
         foreach (var c in q.Choices) yield return c;
         if (q.Box is not null) foreach (var l in q.Box.Lines) yield return l;
         if (q.Passage is not null) foreach (var l in q.Passage.Lines) yield return l;
+        if (q.Conditions is not null) foreach (var l in q.Conditions.Lines) yield return l;
+        foreach (var s in q.SubQuestions) yield return s.Text;
     }
 }

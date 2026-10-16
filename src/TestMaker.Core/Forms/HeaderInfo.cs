@@ -53,6 +53,11 @@ public sealed class HeaderInfo(XDocument doc)
 
     public IEnumerable<XElement> AllStyles => Styles.Elements(Hh + "style");
 
+    /// <summary>문단번호 체계의 수준별 번호 모양(예: "논술형 ^1>"). level은 0부터. 없으면 "".</summary>
+    public string NumberingText(int numberingId, int level) =>
+        Doc.Descendants(Hh + "numbering").FirstOrDefault(n => Attr(n, "id", -1) == numberingId)?
+            .Elements(Hh + "paraHead").FirstOrDefault(h => Attr(h, "level") == level + 1)?.Value ?? "";
+
     public bool IsBold(int charPrId) => CharPr(charPrId)?.Element(Hh + "bold") is not null;
 
     /// <summary>
@@ -311,7 +316,19 @@ public sealed class HeaderInfo(XDocument doc)
         return id;
     }
 
-    /// <summary>왼쪽 탭 위치(문단 왼쪽 여백 기준, HWPUNIT) 정의를 추가한다.</summary>
+    /// <summary>
+    /// 탭 하나짜리 정의를 추가한다. type: LEFT/RIGHT/CENTER, leader: NONE/SOLID(밑줄)/DOT….
+    /// 예: 단 끝 RIGHT + SOLID → "∘ ____" 답 쓰는 줄.
+    /// </summary>
+    public int AddTabStop(int position, string type, string leader)
+    {
+        int id = AddTabStops(position);
+        var item = Doc.Descendants(Hh + "tabPr").First(t => Attr(t, "id", -1) == id).Descendants(Hh + "tabItem");
+        foreach (var i in item) { i.SetAttributeValue("type", type); i.SetAttributeValue("leader", leader); }
+        return id;
+    }
+
+    /// <summary>왼쪽 탭 위치(단 왼쪽 끝 기준, HWPUNIT) 정의를 추가한다.</summary>
     public int AddTabStops(params int[] positions)
     {
         var tabs = Doc.Descendants(Hh + "tabProperties").First();
