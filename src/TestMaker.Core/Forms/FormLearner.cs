@@ -451,9 +451,13 @@ public static class FormLearner
         return proto;
     }
 
-    /// <summary>상자 표에서 내용이 들어가는 칸: 문단이 가장 많은(같으면 가장 높은) 칸.</summary>
+    /// <summary>
+    /// 상자 표에서 내용이 들어가는 칸: 가장 넓은 칸(내용 칸은 상자 폭 전체를 차지한다), 같으면 문단이 많은 칸, 높은 칸.
+    /// (문단 수를 먼저 보면 내용이 한 줄인 &lt;보기&gt;에서 제목 칸을 고를 수 있다.)
+    /// </summary>
     public static XElement ContentCell(XElement tbl) => tbl.Descendants(Hp + "tc")
-        .OrderByDescending(tc => tc.Descendants(Hp + "p").Count())
+        .OrderByDescending(tc => Attr(tc.Element(Hp + "cellSz") ?? tc, "width"))
+        .ThenByDescending(tc => tc.Descendants(Hp + "p").Count())
         .ThenByDescending(tc => Attr(tc.Element(Hp + "cellSz") ?? tc, "height"))
         .First();
 

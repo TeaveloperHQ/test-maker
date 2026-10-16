@@ -66,8 +66,15 @@ public static class DefaultFormBuilder
             session.Open(styled);
             WriteSample(new HwpWriter(session), ids, log ?? (_ => { }));
             session.SaveAs(source, HwpFormat.Hwpx); // 앱용: {{자리표시}} 그대로
+            session.NewDocument();
+
+            // 스타일 지정과 <보 기> 상자 모양은 XML에서 한다(COM 스타일 적용은 가끔 대화상자를 띄워 멈춘다,
+            // 칸 합치기·칸별 테두리도 XML이 확실하다).
+            FinishInXml(source, ids);
+            log?.Invoke("스타일·<보기> 상자");
 
             // 배포용: 앱 없이 쓰는 선생님이 바로 고쳐 쓰도록 자리표시를 예시 글로 바꿔 저장
+            session.Open(source);
             var w = new HwpWriter(session);
             foreach (var (token, text) in DistributionText) w.ReplaceAll(token, text);
             var dist = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(formDir))!, DistributionFile);
@@ -84,6 +91,43 @@ public static class DefaultFormBuilder
         finally
         {
             try { Directory.Delete(work, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    static void FinishInXml(string hwpx, StyleIds ids)
+    {
+        using var zip = ZipFile.Open(hwpx, ZipArchiveMode.Update);
+        var header = Hx.Load(zip, Hx.HeaderPart);
+        var section = Hx.Load(zip, Hx.SectionPart);
+        var info = new HeaderInfo(header);
+        if (StyleTags.Apply(section, info) == 0) throw new InvalidOperationException("스타일 표시를 찾지 못했습니다.");
+        StyleBoxParagraphs(section, info, ids);
+        var tbl = ViewBoxShape.Find(section) ?? throw new InvalidOperationException("견본의 <보기> 상자를 찾지 못했습니다.");
+        ViewBoxShape.Apply(tbl, info);
+        Hx.Replace(zip, Hx.HeaderPart, header);
+        Hx.Replace(zip, Hx.SectionPart, section);
+    }
+
+    /// <summary>
+    /// 견본 문항 안의 상자(자료·보기) 문단: "이어지는 발문" 스타일을 주고, 표 위치 기준을 단이 아닌 문단으로 바꿔
+    /// 발문 글자 위치에 맞춘다. (표 앞에 스타일 표시를 넣으면 한글이 표를 다른 문단으로 떼어 빈 줄이 생긴다 — 실측)
+    /// 머리 부분(결재란·유의사항)과 꼬리(확인 사항) 상자는 그대로 둔다.
+    /// </summary>
+    static void StyleBoxParagraphs(System.Xml.Linq.XDocument section, HeaderInfo info, StyleIds ids)
+    {
+        var paras = section.Root!.Elements(Hx.Hp + "p").ToList();
+        string Id(int v) => v.ToString();
+        int first = paras.FindIndex(p => (string?)p.Attribute("styleIDRef") == Id(ids.Stem));
+        var choiceStyles = new[] { ids.ChoiceAuto, ids.Choice2, ids.Choice3, ids.Choice5 }.Select(Id).ToHashSet();
+        int lastChoice = paras.FindLastIndex(p => choiceStyles.Contains((string?)p.Attribute("styleIDRef") ?? ""));
+        var cont = info.Style(ids.Cont)!;
+        for (int i = first + 1; i < lastChoice; i++)
+        {
+            var tbl = Hx.Table(paras[i]);
+            if (tbl is null) continue;
+            paras[i].SetAttributeValue("styleIDRef", ids.Cont);
+            paras[i].SetAttributeValue("paraPrIDRef", Hx.Attr(cont, "paraPrIDRef"));
+            tbl.Element(Hx.Hp + "pos")?.SetAttributeValue("horzRelTo", "PARA");
         }
     }
 
@@ -190,83 +234,84 @@ public static class DefaultFormBuilder
         w.BreakPara();
         w.Text("※ 시험지 {{쪽수}}쪽, {{문항수}}문항, {{총점}}점 만점입니다. 문항에 따라 배점이 다릅니다.");
         w.ExitTable();
-        w.Style(s.Cont);
+        Tag(w, s.Cont);
         w.BreakPara();
 
         log("유의사항");
         // ── 견본 문항 ──
         // 1번: 자료 상자 → 이어지는 발문 → <보기> → 2행(3+2) 선택지
-        w.Style(s.Stem);
+        Tag(w, s.Stem);
         w.Text("다음은 어떤 실험 과정을 나타낸 것이다.");
         w.BreakPara();
-        w.Style(s.Cont);
         w.BeginTable(1, [boxMm]);
-        w.Style(s.Passage);
+        Tag(w, s.Passage);
         w.Text("(가) 첫째 과정");
         w.BreakPara();
+        Tag(w, s.Passage);
         w.Text("(나) 둘째 과정");
         w.ExitTable();
-        w.Style(s.Cont);
+        Tag(w, s.Cont);
         w.Text("이에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은? [3점]");
         w.BreakPara();
-        w.Style(s.Cont);
         w.BeginTable(2, [boxMm]);
-        w.Style(s.ViewTitle);
+        Tag(w, s.ViewTitle);
         w.Text("<보 기>");
         w.NextCell();
-        w.Style(s.View);
+        Tag(w, s.View);
         w.Text("첫째 진술");
         w.BreakPara();
+        Tag(w, s.View);
         w.Text("둘째 진술");
         w.BreakPara();
+        Tag(w, s.View);
         w.Text("셋째 진술");
         w.ExitTable();
         Choices(w, s.Choice3, ["① ㄱ\t② ㄴ\t③ ㄱ, ㄴ", "④ ㄴ, ㄷ\t⑤ ㄱ, ㄴ, ㄷ"]);
         Gap(w, s);
 
         // 2번: 5행(자동번호)
-        w.Style(s.Stem);
+        Tag(w, s.Stem);
         w.Text("다음 중 옳은 것은? [3점]");
         w.BreakPara();
         foreach (var c in new[] { "첫째 선택지", "둘째 선택지", "셋째 선택지", "넷째 선택지", "다섯째 선택지" })
         {
-            w.Style(s.ChoiceAuto);
+            Tag(w, s.ChoiceAuto);
             w.Text(c);
             w.BreakPara();
         }
         Gap(w, s);
 
         // 3번: 3행(2+2+1)
-        w.Style(s.Stem);
+        Tag(w, s.Stem);
         w.Text("다음 중 옳은 것은? [3점]");
         w.BreakPara();
         Choices(w, s.Choice2, ["① 가\t② 나", "③ 다\t④ 라", "⑤ 마"]);
         Gap(w, s);
 
         // [4∼5] 묶음 + 4번: 1행(5칸)
-        w.Style(s.Group);
+        Tag(w, s.Group);
         w.Text("[4∼5] 다음 글을 읽고 물음에 답하시오.");
         w.BreakPara();
-        w.Style(s.Stem);
+        Tag(w, s.Stem);
         w.Text("빈칸에 알맞은 것은? [3점]");
         w.BreakPara();
         Choices(w, s.Choice5, ["① 1\t② 2\t③ 3\t④ 4\t⑤ 5"]);
         Gap(w, s);
 
         // 5번: 5행
-        w.Style(s.Stem);
+        Tag(w, s.Stem);
         w.Text("다음 중 옳지 않은 것은? [3점]");
         w.BreakPara();
         foreach (var c in new[] { "가", "나", "다", "라", "마" })
         {
-            w.Style(s.ChoiceAuto);
+            Tag(w, s.ChoiceAuto);
             w.Text(c);
             w.BreakPara();
         }
 
         log("견본 문항");
         // ── 꼬리: 확인 사항 ──
-        w.Style(s.Cont);
+        Tag(w, s.Cont);
         w.BreakPara();
         w.ParaShape(new ParaStyle { Align = ParaAlign.Left });
         w.BeginTable(1, [colMm - 2]);
@@ -279,11 +324,14 @@ public static class DefaultFormBuilder
         w.ExitTable();
     }
 
+    /// <summary>문단 맨 앞에 스타일 표시를 남긴다. 스타일은 저장 뒤 XML에서 지정한다(<see cref="StyleTags"/>).</summary>
+    static void Tag(HwpWriter w, int styleId) => w.Text(StyleTags.Tag(styleId));
+
     static void Choices(HwpWriter w, int style, string[] lines)
     {
         foreach (var line in lines)
         {
-            w.Style(style);
+            Tag(w, style);
             var parts = line.Split('\t');
             for (int i = 0; i < parts.Length; i++)
             {
@@ -297,9 +345,9 @@ public static class DefaultFormBuilder
     /// <summary>문항 사이 빈 줄 2개(학습기가 간격으로 배움).</summary>
     static void Gap(HwpWriter w, StyleIds s)
     {
-        w.Style(s.Cont);
+        Tag(w, s.Cont);
         w.BreakPara();
-        w.Style(s.Cont);
+        Tag(w, s.Cont);
         w.BreakPara();
     }
 }

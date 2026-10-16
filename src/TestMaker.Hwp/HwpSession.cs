@@ -45,14 +45,36 @@ public sealed class HwpSession : IDisposable
 
     public void NewDocument() => hwp.Clear(1);
 
+    // 한글은 자동화 프로그램이 임시 폴더 밖의 파일을 열거나 저장하면 보안 확인 창
+    // ("한글을 이용하여 위 파일에 접근하려는 시도가 있습니다… 접근 허용?")을 띄워, 숨김 상태에서는 그대로 멈춘다(실측).
+    // 그래서 한글이 직접 읽고 쓰는 파일은 항상 이 세션의 임시 폴더에 두고, 사용자 위치와는 .NET이 복사한다.
+    string? workDir;
+    int workSeq;
+
+    string WorkPath(string extension)
+    {
+        workDir ??= Directory.CreateTempSubdirectory("testmaker_hwp_").FullName;
+        return Path.Combine(workDir, $"f{++workSeq}{extension}");
+    }
+
+    static bool InTemp(string fullPath) =>
+        fullPath.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase);
+
     /// <param name="displayName">오류 메시지에 보일 원래 파일 이름(임시 사본을 열 때).</param>
     public void Open(string path, string? displayName = null)
     {
+        var full = Path.GetFullPath(path);
         var name = displayName ?? Path.GetFileName(path);
-        if (HwpFileInfo.IsPasswordProtected(path))
+        if (HwpFileInfo.IsPasswordProtected(full))
             throw new IOException($"암호가 걸린 한글 파일이라 열 수 없습니다: {name} — 한글에서 암호를 풀고 다른 이름으로 저장한 사본을 주세요.");
+        if (!InTemp(full))
+        {
+            var copy = WorkPath(Path.GetExtension(full));
+            File.Copy(full, copy);
+            full = copy;
+        }
         // suspendpassword: 암호 입력창을 띄우지 않는다(숨김 창에서 입력창이 뜨면 멈춘다).
-        bool ok = hwp.Open(Path.GetFullPath(path), "", "forceopen:true;suspendpassword:true");
+        bool ok = hwp.Open(full, "", "forceopen:true;suspendpassword:true");
         if (!ok) throw new IOException($"한글에서 파일을 열지 못했습니다: {name}");
     }
 
@@ -61,8 +83,20 @@ public sealed class HwpSession : IDisposable
         var full = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         string fmt = format switch { HwpFormat.Hwp => "HWP", HwpFormat.Hwpx => "HWPX", _ => "PDF" };
-        bool ok = hwp.SaveAs(full, fmt, "");
-        if (!ok) throw new IOException($"저장하지 못했습니다({fmt}): {path} — 파일이 다른 프로그램에서 열려 있는지 확인하세요.");
+
+        // 한글은 항상 임시 폴더의 새 파일에 저장한다(보안 확인 창·덮어쓰기 확인 창을 피함).
+        var temp = InTemp(full) && !File.Exists(full) ? full : WorkPath(Path.GetExtension(full));
+        bool ok = hwp.SaveAs(temp, fmt, "");
+        if (!ok) throw new IOException($"저장하지 못했습니다({fmt}): {path}");
+        if (temp == full) return;
+        try
+        {
+            File.Copy(temp, full, overwrite: true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException($"{Path.GetFileName(full)} 파일이 다른 프로그램(한글 등)에서 열려 있어 저장할 수 없습니다. 닫고 다시 실행하세요.", e);
+        }
     }
 
     public static HwpFormat FormatOf(string path) => Path.GetExtension(path).ToLowerInvariant() switch
@@ -86,5 +120,9 @@ public sealed class HwpSession : IDisposable
         // "열려 있는 한글에 연결됨"으로 멈추지 않도록, 우리가 띄운 프로세스가 끝날 때까지 기다린다.
         try { ownProcess?.WaitForExit(15_000); } catch (InvalidOperationException) { }
         ownProcess?.Dispose();
+        if (workDir is not null)
+        {
+            try { Directory.Delete(workDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 }

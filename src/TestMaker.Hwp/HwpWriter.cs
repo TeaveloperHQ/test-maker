@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Reflection;
 using TestMaker.Core.Templates;
 using TestMaker.Core.Text;
@@ -13,10 +13,14 @@ public sealed class HwpWriter(HwpSession session)
 {
     readonly dynamic hwp = session.Raw;
 
+    /// <summary>진단용: 한글에 보내는 동작마다 호출된다(멈춤 위치 찾기). TESTMAKER_TRACE=1이면 콘솔에 찍는다.</summary>
+    public Action<string>? Trace { get; set; } =
+        Environment.GetEnvironmentVariable("TESTMAKER_TRACE") == "1" ? m => Console.Error.WriteLine($"[hwp] {m}") : null;
+
     /// <summary>커서가 있는 문단이 비어 있는지. <see cref="NewPara"/>가 빈 줄을 덧붙이지 않게 하는 데 쓴다.</summary>
     public bool ParagraphEmpty { get; private set; } = true;
 
-    public void Run(string action) => hwp.HAction.Run(action);
+    public void Run(string action) { Trace?.Invoke("Run " + action); hwp.HAction.Run(action); }
     public void BreakPara() { Run("BreakPara"); ParagraphEmpty = true; }
     public void BreakLine() => Run("BreakLine");
     public void MoveDocEnd() => hwp.MovePos(3, 0, 0);
@@ -33,6 +37,7 @@ public sealed class HwpWriter(HwpSession session)
     public void Text(string s)
     {
         if (s.Length == 0) return;
+        Trace?.Invoke("Text " + s);
         ParagraphEmpty = false;
         var p = hwp.HParameterSet.HInsertText;
         hwp.HAction.GetDefault("InsertText", p.HSet);
@@ -51,14 +56,8 @@ public sealed class HwpWriter(HwpSession session)
         hwp.HAction.Execute("PageNumPos", p.HSet);
     }
 
-    /// <summary>현재 문단에 문단 스타일을 적용한다. id = header.xml의 스타일 id.</summary>
-    public void Style(int id)
-    {
-        var p = hwp.HParameterSet.HStyle;
-        hwp.HAction.GetDefault("Style", p.HSet);
-        p.Apply = id;
-        hwp.HAction.Execute("Style", p.HSet);
-    }
+    // 문단 스타일 적용(HAction "Style")은 일부러 두지 않는다: 가끔 스타일 대화상자를 띄워 숨김 한글이 멈춘다(실측).
+    // 스타일은 StyleTags(문단 앞 "§id§" 표시 → XML에서 지정)로 준다.
 
     /// <summary>이후 입력할 글자의 모양.</summary>
     public void CharShape(TextStyle s)
@@ -176,6 +175,7 @@ public sealed class HwpWriter(HwpSession session)
     /// <param name="colWidthsMm">칸의 바깥 폭(안쪽 여백 포함). 표 전체 폭 = 합계.</param>
     public void BeginTable(int rows, IReadOnlyList<double> colWidthsMm)
     {
+        Trace?.Invoke($"BeginTable {rows}x{colWidthsMm.Count}");
         ParagraphEmpty = false;
         int cols = colWidthsMm.Count;
         var p = hwp.HParameterSet.HTableCreation;
@@ -255,6 +255,7 @@ public sealed class HwpWriter(HwpSession session)
     /// <summary>문서 전체(표 안 포함)에서 바꾸기.</summary>
     public void ReplaceAll(string find, string replace)
     {
+        Trace?.Invoke($"ReplaceAll {find} -> {replace}");
         var p = hwp.HParameterSet.HFindReplace;
         hwp.HAction.GetDefault("AllReplace", p.HSet);
         p.FindString = find;

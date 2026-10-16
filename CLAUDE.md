@@ -31,6 +31,11 @@ Exam-paper generator for Korean teachers. Goal: every school's 시험지 양식 
 - After `Quit`, Hwp.exe lingers briefly; a new session can attach to it and abort. `HwpSession.Dispose` waits for its own process to exit.
 - Forms may number several question types at level 0 (선택형 "1." + 논술형 "논술형 1>"): only the most-used numbering is treated as stems; others are block boundaries.
 - Boxes cloned from real exams may have fixed tall rows (they held figures): `ShrinkRow` resets the content row height.
+- **Security prompt**: when automation opens/saves a file outside `%TEMP%`, 한글 shows "한글을 이용하여 위 파일에 접근하려는 시도… 접근 허용?" → hidden instance hangs. `HwpSession.Open/SaveAs` always route through a session temp dir and copy with .NET. Never call `hwp.Open/SaveAs` with user paths directly.
+- **Never apply styles via COM** (`HAction "Style"`): it intermittently opens the 스타일 dialog → hang. The builder writes `§id§` tags (`StyleTags`) and assigns styles in XML. Don't put a tag right before `TableCreate` — 한글 splits the table into its own paragraph (blank line + unstyled box); style box paragraphs in XML instead.
+- COM-created tables save `<hp:sz width="0">` (use cellSz widths) and `horzRelTo="COLUMN"` (ignores paragraph margin — set `PARA` to indent boxes under stem text).
+- `<보 기>` title-on-border box = 3×3 table built in XML (`ViewBoxShape`); `ContentCell` picks the widest cell (paragraph count picks the title cell for 1-line 보기).
+- Diagnosing hangs: `TESTMAKER_TRACE=1` traces HwpWriter calls; read dialog text of the hung Hwp.exe with UI Automation (`AutomationElement` by ProcessId).
 - COM session: abort if attached to the user's open 한글; dispose always (unhandled exceptions skip finally → leaked Hwp.exe).
 - COM-typing gotchas (builder/answer sheet): `BreakColDef` + MultiColumn `ApplyTo=2`; table ColWidth excludes 3.6mm cell padding; 한글 appends an empty paragraph after a table at doc end; tab stops via COM `TabDef` render inconsistently; `CreateItemArray` returns null in C# (set `Item` via reflection).
 

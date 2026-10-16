@@ -264,6 +264,29 @@ public sealed class HeaderInfo(XDocument doc)
         return id;
     }
 
+    /// <summary>
+    /// 칸 테두리 정의를 추가한다. 변마다 선 굵기(예: "0.12 mm") 또는 null(선 없음).
+    /// 테두리 없는 정의(id 1)를 바탕으로 만든다.
+    /// </summary>
+    public int AddBorderFill(string? left, string? right, string? top, string? bottom)
+    {
+        var fills = Doc.Descendants(Hh + "borderFills").First();
+        var src = fills.Elements(Hh + "borderFill").First(b => Attr(b, "id") == 1);
+        var b = new XElement(src);
+        int id = NextId(fills, "borderFill");
+        b.SetAttributeValue("id", id);
+        b.Element(Hc + "fillBrush")?.Remove();
+        foreach (var (name, width) in new[] { ("leftBorder", left), ("rightBorder", right), ("topBorder", top), ("bottomBorder", bottom) })
+        {
+            var side = b.Element(Hh + name)!;
+            side.SetAttributeValue("type", width is null ? "NONE" : "SOLID");
+            side.SetAttributeValue("width", width ?? "0.12 mm");
+        }
+        fills.Add(b);
+        fills.SetAttributeValue("itemCnt", fills.Elements(Hh + "borderFill").Count());
+        return id;
+    }
+
     /// <summary>스타일의 글자 모양을 바꾼다(예: 바탕글을 본문 글꼴로).</summary>
     public void SetStyleCharShape(int styleId, int charPr) => Style(styleId)?.SetAttributeValue("charPrIDRef", charPr);
 

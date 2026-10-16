@@ -3,7 +3,7 @@
   "learnedFrom": [
     "표준 시험지 양식(B4).hwp"
   ],
-  "learnedAt": "2026-10-16T10:37:59.8822004+09:00",
+  "learnedAt": "2026-10-16T14:13:53.5446363+09:00",
   "kind": "Structured",
   "columnWidthMm": 105.5,
   "stem": {
@@ -17,7 +17,7 @@
   "stemContinuation": {
     "styleName": "이어지는 발문",
     "styleId": 24,
-    "paraPr": 36,
+    "paraPr": 34,
     "charPr": 7,
     "autoNumber": false
   },
