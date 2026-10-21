@@ -1,12 +1,12 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
-using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using TestMaker.Ai;
+using TestMaker.Core.Bank;
 using TestMaker.Core.Models;
 using TestMaker.Core.Serialization;
 using TestMaker.Core.Templates;
@@ -17,17 +17,23 @@ namespace TestMaker.App;
 
 public static class Choices
 {
+    public static readonly string[] Styles = VariantStyle.All;
     public static readonly int[] Counts = Enumerable.Range(0, 11).ToArray();
 }
 
 public sealed record FormChoice(string Name, string Dir);
 
-/// <summary>결과 미리보기 한 칸(만든 문항 하나).</summary>
-public sealed class ResultItem(string id, int index, Action<ResultItem> changed) : Observable
+/// <summary>③ 결과 미리보기 한 칸(만든 문항 하나).</summary>
+public sealed class ResultItem(string id, int index, Question item, Action<ResultItem> changed) : Observable
 {
     public string Id { get; } = id;
     public int Index { get; } = index;
+    /// <summary>작업 안에서 이 결과를 가리키는 이름(예: "q01/0").</summary>
+    public string Key => $"{Id}/{Index}";
+    public Question Item { get; } = item;
     public string Title { get; init; } = "";
+    /// <summary>문항함에 보관할 때의 이름(문항 요약 포함).</summary>
+    public string BankTitle { get; init; } = "";
     public string Top { get; init; } = "";
     public string Bottom { get; init; } = "";
     public string Answer { get; init; } = "";
@@ -35,21 +41,51 @@ public sealed class ResultItem(string id, int index, Action<ResultItem> changed)
 
     bool include = true;
     public bool Include { get => include; set { if (Set(ref include, value)) changed(this); } }
+
+    string archived = "";
+    /// <summary>"시험용에 보관됨" 같은 표시. 비어 있으면 아직 보관하지 않음.</summary>
+    public string Archived
+    {
+        get => archived;
+        set { if (Set(ref archived, value)) OnChanged(nameof(ArchivedVisibility)); }
+    }
+    public Visibility ArchivedVisibility => archived.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+}
+
+/// <summary>④ 시험지에 들어갈 문항 하나(이번 작업의 결과이거나 문항함의 문항).</summary>
+public sealed class ExamEntry(string key, string title, string sub, Question question, bool fromJob) : Observable
+{
+    public string Key { get; } = key;
+    public string Title { get; } = title;
+    public string Sub { get; } = sub;
+    /// <summary>그림 경로를 절대 경로로 바꾼 사본.</summary>
+    public Question Question { get; } = question;
+    public bool FromJob { get; } = fromJob;
+
+    int number;
+    public int Number { get => number; set => Set(ref number, value); }
 }
 
 public partial class MainWindow : Window
 {
-    static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "TestMaker");
+    /// <summary>작업·양식·문항함·시험지를 두는 곳. (개발용) TESTMAKER_HOME 으로 바꿀 수 있다 — 선생님 문서 폴더를 건드리지 않고 시험할 때.</summary>
+    static readonly string Home = Environment.GetEnvironmentVariable("TESTMAKER_HOME") is { Length: > 0 } h ? h
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "TestMaker");
     static readonly string JobsDir = Path.Combine(Home, "작업");
     static readonly string FormsDir = Path.Combine(Home, "양식");
+    static readonly string ExamsDir = Path.Combine(Home, "시험지");
+    static readonly string BankDir = Path.Combine(Home, "문항함");
 
     readonly ObservableCollection<SourceFile> sources = [];
     readonly ObservableCollection<FoundQuestion> questions = [];
     readonly ObservableCollection<ResultItem> results = [];
+    readonly ObservableCollection<ExamEntry> examEntries = [];
     readonly HashSet<(string Id, int Index)> excluded = [];
+    readonly QuestionBank bank = new(BankDir);
     readonly ClaudeCode? claude;
     Authoring? job;
     CancellationTokenSource? cts;
+    bool refreshing;
 
     public MainWindow()
     {
@@ -57,12 +93,11 @@ public partial class MainWindow : Window
         SourceList.ItemsSource = sources;
         QuestionGrid.ItemsSource = questions;
         ResultList.ItemsSource = results;
-        StyleBox.ItemsSource = VariantStyle.All;
-        StyleBox.SelectedIndex = 0;
-        AllVariants.ItemsSource = Choices.Counts;
-        AllVariants.SelectedItem = 1;
+        ExamList.ItemsSource = examEntries;
         sources.CollectionChanged += (_, _) => DropHint.Visibility = sources.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        examEntries.CollectionChanged += (_, _) => Renumber();
         LoadForms();
+        Renumber();
 
         if (ClaudeCode.Find() is { } exe) claude = new ClaudeCode(exe);
         else Status("Claude Code를 찾지 못했습니다. 설치하고 로그인한 뒤 다시 실행하세요(문항 찾기·변형에 필요).");
@@ -77,13 +112,30 @@ public partial class MainWindow : Window
             ContentRendered += async (_, _) =>
             {
                 await Task.Delay(1500);
-                var rtb = new RenderTargetBitmap((int)ActualWidth, (int)ActualHeight, 96, 96, PixelFormats.Pbgra32);
-                rtb.Render((Visual)Content);
-                var enc = new PngBitmapEncoder();
-                enc.Frames.Add(BitmapFrame.Create(rtb));
-                using (var f = File.Create(snap)) enc.Save(f);
+                Snapshot(this, snap);
+                // TESTMAKER_SNAPSHOT_BANK=파일.png 이면 문항함 창도 찍는다.
+                if (Environment.GetEnvironmentVariable("TESTMAKER_SNAPSHOT_BANK") is { Length: > 0 } bankSnap)
+                {
+                    var w = new BankWindow(bank) { Owner = this };
+                    w.Show();
+                    await Task.Delay(1500);
+                    if (w.ItemList.Items.Count > 0) w.ItemList.SelectedIndex = 0;
+                    await Task.Delay(500);
+                    Snapshot(w, bankSnap);
+                    w.Close();
+                }
                 Close();
             };
+    }
+
+    static void Snapshot(Window w, string path)
+    {
+        var rtb = new RenderTargetBitmap((int)w.ActualWidth, (int)w.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+        rtb.Render((Visual)w.Content);
+        var enc = new PngBitmapEncoder();
+        enc.Frames.Add(BitmapFrame.Create(rtb));
+        using var f = File.Create(path);
+        enc.Save(f);
     }
 
     // ── 작업 ──────────────────────────────────────────────
@@ -101,14 +153,13 @@ public partial class MainWindow : Window
     {
         sources.Clear(); questions.Clear(); results.Clear(); excluded.Clear();
         JobText.Text = job is null ? "새 작업" : $"작업 폴더: {job.Dir}";
-        if (job is null) return;
+        if (job is null) { SyncJobEntries(); return; }
         foreach (var s in job.Job.Sources) sources.Add(s);
         foreach (var q in job.Job.Questions)
         {
             q.Status = File.Exists(Path.Combine(job.Dir, q.ItemFile)) ? "완료" : "";
             questions.Add(q);
         }
-        StyleBox.SelectedItem = job.Job.Style;
         RequestBox.Text = job.Job.Request;
         var info = job.Job.Info;
         TitleBox.Text = info.Title; SubjectBox.Text = info.Subject.Length > 0 ? info.Subject : "과학";
@@ -227,7 +278,7 @@ public partial class MainWindow : Window
             if (first is not null && Authoring.ImageExtensions.Contains(Path.GetExtension(first).ToLowerInvariant())) img = Path.Combine(job.Dir, first);
             else if (s.Figures.Count > 0) img = Path.Combine(job.Dir, s.Figures[0]);
         }
-        SourcePreview.Source = img is null ? null : LoadImage(img);
+        SourcePreview.Source = Preview.LoadImage(img);
         PreviewBox.Visibility = SourcePreview.Source is null ? Visibility.Collapsed : Visibility.Visible;
     }
 
@@ -240,7 +291,7 @@ public partial class MainWindow : Window
         {
             var found = await job.FindQuestionsAsync(Status, ct);
             questions.Clear();
-            foreach (var q in found) { q.Variants = (int)(AllVariants.SelectedItem ?? 1); questions.Add(q); }
+            foreach (var q in found) questions.Add(q);
             job.Save();
             RefreshResults();
             Status(found.Count == 0 ? "문항을 찾지 못했습니다. 자료를 확인하세요." : $"문항 {found.Count}개를 찾았습니다. 문항마다 변형 수를 정하고 [변형 만들기]를 누르세요.");
@@ -249,10 +300,48 @@ public partial class MainWindow : Window
 
     // ── ② 변형 ───────────────────────────────────────────
 
-    void ApplyAll_Click(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// 변형 수 칸(쳐 넣을 수 있는 드롭다운)에서 ↑↓: 목록이 닫혀 있으면 값을 바꾸지 않고 위·아래 문항의 변형 수 칸으로(엑셀처럼).
+    /// 목록이 열려 있으면 원래대로 목록 안에서 움직인다.
+    /// </summary>
+    void QuestionGrid_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        foreach (var q in questions) q.Variants = (int)(AllVariants.SelectedItem ?? 1);
-        job?.Save();
+        if (e.Key is not (System.Windows.Input.Key.Up or System.Windows.Input.Key.Down)) return;
+        var box = FindParent<System.Windows.Controls.ComboBox>(e.OriginalSource as DependencyObject);
+        if (box is null || (string?)box.Tag != "Variants" || box.IsDropDownOpen) return;
+        e.Handled = true;
+        int i = questions.IndexOf((FoundQuestion)box.DataContext) + (e.Key == System.Windows.Input.Key.Down ? 1 : -1);
+        if (i < 0 || i >= questions.Count) return;
+        QuestionGrid.ScrollIntoView(questions[i]);
+        QuestionGrid.UpdateLayout();
+        if (QuestionGrid.ItemContainerGenerator.ContainerFromIndex(i) is DependencyObject row
+            && FindChild<System.Windows.Controls.ComboBox>(row, c => (string?)c.Tag == "Variants") is { } next)
+            next.Focus();
+    }
+
+    /// <summary>변형 수 칸에 들어가면 숫자를 통째로 골라 둔다 — 바로 치면 바뀐다.</summary>
+    void VariantsBox_GotKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.ComboBox box
+            && box.Template.FindName("PART_EditableTextBox", box) is System.Windows.Controls.TextBox tb)
+            Dispatcher.BeginInvoke(tb.SelectAll);
+    }
+
+    static T? FindParent<T>(DependencyObject? d) where T : DependencyObject
+    {
+        while (d is not null and not T) d = d is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d);
+        return d as T;
+    }
+
+    static T? FindChild<T>(DependencyObject d, Func<T, bool> match) where T : DependencyObject
+    {
+        for (int k = 0; k < VisualTreeHelper.GetChildrenCount(d); k++)
+        {
+            var c = VisualTreeHelper.GetChild(d, k);
+            if (c is T t && match(t)) return t;
+            if (FindChild(c, match) is { } found) return found;
+        }
+        return null;
     }
 
     async void Make_Click(object sender, RoutedEventArgs e)
@@ -269,14 +358,17 @@ public partial class MainWindow : Window
 
     async void Remake_Click(object sender, RoutedEventArgs e)
     {
-        if (QuestionGrid.SelectedItem is FoundQuestion q) await MakeAsync([q]);
+        if (QuestionGrid.CurrentItem is FoundQuestion q) await MakeAsync([q]);
     }
 
     async Task MakeAsync(List<FoundQuestion> todo)
     {
         var j = job!;
-        j.Job.Style = StyleBox.SelectedItem as string ?? VariantStyle.Auto;
+        QuestionGrid.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Row, exitEditingMode: true);
         j.Job.Request = RequestBox.Text;
+        // 다시 만드는 문항은 예전 결과의 보관 표시를 지운다(문항함에 있는 것은 그대로 남는다).
+        foreach (var q in todo)
+            foreach (var key in j.Job.Archived.Keys.Where(k => k.StartsWith(q.Id + "/")).ToList()) j.Job.Archived.Remove(key);
         j.Save();
         var failed = new List<string>();
         await Run($"변형 문항을 만드는 중… ({todo.Count}문항, 문항당 몇 분 걸립니다)", async ct =>
@@ -307,73 +399,187 @@ public partial class MainWindow : Window
             }));
         });
         if (failed.Count > 0) MessageBox.Show(this, string.Join("\n\n", failed), "만들지 못한 문항", MessageBoxButton.OK, MessageBoxImage.Warning);
-        Status($"변형을 만들었습니다. 오른쪽에서 확인하고, 뺄 문항은 체크를 끄고 [시험지 만들기]를 누르세요.");
+        Status("변형을 만들었습니다. ③에서 확인하고 보관하거나, ④에서 바로 시험지를 만드세요.");
     }
 
-    // ── ③ 결과·시험지 ─────────────────────────────────────
+    // ── ③ 결과 확인과 보관 ─────────────────────────────────
 
     void RefreshResults()
     {
+        refreshing = true;
         results.Clear();
-        if (job is null) return;
-        foreach (var q in questions.Where(q => q.Include))
+        if (job is not null)
         {
-            var items = job.LoadItems(q);
-            for (int i = 0; i < items.Count; i++)
+            foreach (var q in questions.Where(q => q.Include))
             {
-                var item = items[i];
-                var label = q.KeepOriginal && i == 0 ? "원문항" : $"변형 {(q.KeepOriginal ? i : i + 1)}";
-                results.Add(new ResultItem(q.Id, i, r => { if (r.Include) excluded.Remove((r.Id, r.Index)); else excluded.Add((r.Id, r.Index)); })
+                var items = job.LoadItems(q);
+                for (int i = 0; i < items.Count; i++)
                 {
-                    Title = $"{q.Number}번 · {label}  [{Format.Points(item.TotalPoints)}점]",
-                    Top = Plain(item.Stem),
-                    Image = item.Image is { Path.Length: > 0 } img ? LoadImage(Path.Combine(job.Dir, img.Path)) : null,
-                    Bottom = Body(item),
-                    Answer = AnswerText(item),
-                    Include = !excluded.Contains((q.Id, i)),
-                });
+                    var item = items[i];
+                    var label = q.KeepOriginal && i == 0 ? "원문항" : $"변형 {(q.KeepOriginal ? i : i + 1)}";
+                    var r = new ResultItem(q.Id, i, item, OnResultChanged)
+                    {
+                        Title = $"{q.Number}번 · {label}  [{Format.Points(item.TotalPoints)}점]",
+                        BankTitle = $"{q.Number}번 {label} · {q.Summary}",
+                        Top = Preview.Plain(item.Stem),
+                        Image = item.Image is { Path.Length: > 0 } img ? Preview.LoadImage(Path.Combine(job.Dir, img.Path)) : null,
+                        Bottom = Preview.Body(item),
+                        Answer = Preview.Answer(item),
+                        Include = !excluded.Contains((q.Id, i)),
+                    };
+                    if (job.Job.Archived.TryGetValue(r.Key, out var cat)) r.Archived = $"{cat}에 보관됨";
+                    results.Add(r);
+                }
             }
         }
+        refreshing = false;
+        SyncJobEntries();
+    }
+
+    void OnResultChanged(ResultItem r)
+    {
+        if (r.Include) excluded.Remove((r.Id, r.Index)); else excluded.Add((r.Id, r.Index));
+        if (!refreshing) SyncJobEntries();
+    }
+
+    void ArchiveExam_Click(object sender, RoutedEventArgs e) => Archive(BankCategory.Exam);
+    void ArchivePractice_Click(object sender, RoutedEventArgs e) => Archive(BankCategory.Practice);
+
+    /// <summary>③에서 체크한 문항을 문항함에 보관한다. 이미 보관한 것은 건너뛴다.</summary>
+    void Archive(BankCategory category)
+    {
+        if (job is null) return;
+        var picked = results.Where(r => r.Include).ToList();
+        if (picked.Count == 0) { Status("보관할 문항을 ③에서 체크하세요."); return; }
+        var name = QuestionBank.CategoryName(category);
+        int added = 0, skipped = 0;
+        try
+        {
+            foreach (var r in picked)
+            {
+                if (job.Job.Archived.ContainsKey(r.Key)) { skipped++; continue; }
+                bank.Add(r.Item, job.Dir, category, r.BankTitle, source: Path.GetFileName(job.Dir));
+                job.Job.Archived[r.Key] = name;
+                r.Archived = $"{name}에 보관됨";
+                added++;
+            }
+        }
+        catch (IOException ex) { MessageBox.Show(this, ex.Message, "보관하지 못했습니다", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        job.Save();
+        Status($"{added}문항을 문항함({name})에 보관했습니다." + (skipped > 0 ? $" 이미 보관한 {skipped}문항은 건너뛰었습니다(칸을 바꾸려면 [문항함]에서 옮기세요)." : ""));
+    }
+
+    // ── ④ 시험지 ─────────────────────────────────────────
+
+    /// <summary>④의 '이번 작업' 문항을 ③의 체크와 맞춘다. 문항함에서 넣은 문항과 순서는 그대로 둔다.</summary>
+    void SyncJobEntries()
+    {
+        var wanted = job is null ? [] : results.Where(r => r.Include).ToList();
+        var keys = wanted.Select(r => "job:" + r.Key).ToHashSet();
+        foreach (var stale in examEntries.Where(e => e.FromJob && !keys.Contains(e.Key)).ToList()) examEntries.Remove(stale);
+        foreach (var r in wanted)
+        {
+            var entry = new ExamEntry("job:" + r.Key, r.BankTitle, "이번 작업", QuestionBank.Absolutize(r.Item, job!.Dir), fromJob: true);
+            var i = examEntries.ToList().FindIndex(e => e.Key == entry.Key);
+            if (i >= 0) examEntries[i] = entry;          // 다시 만든 문항이면 새 것으로
+            else examEntries.Add(entry);
+        }
+    }
+
+    void Renumber()
+    {
+        for (int i = 0; i < examEntries.Count; i++) examEntries[i].Number = i + 1;
+        ExamEmpty.Visibility = examEntries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ExamSummary.Text = examEntries.Count == 0 ? "" :
+            $"{examEntries.Count}문항 · 총 {Format.Points(examEntries.Sum(e => e.Question.TotalPoints))}점";
+    }
+
+    void AddFromBank_Click(object sender, RoutedEventArgs e) => ShowBank();
+    void OpenBank_Click(object sender, RoutedEventArgs e) => ShowBank();
+
+    void ShowBank()
+    {
+        var w = new BankWindow(bank) { Owner = this };
+        if (w.ShowDialog() != true) return;
+        int added = 0;
+        foreach (var item in w.Picked)
+        {
+            var key = "bank:" + item.Id;
+            if (examEntries.Any(x => x.Key == key)) continue;
+            examEntries.Add(new ExamEntry(key, item.Title, $"문항함 · {item.CategoryText}", QuestionBank.Absolutize(item.Question, item.Dir), fromJob: false));
+            added++;
+        }
+        Status($"문항함에서 {added}문항을 ④ 시험지에 넣었습니다.");
+    }
+
+    void EntryUp_Click(object sender, RoutedEventArgs e) => MoveEntry(sender, -1);
+    void EntryDown_Click(object sender, RoutedEventArgs e) => MoveEntry(sender, +1);
+
+    void MoveEntry(object sender, int delta)
+    {
+        if ((sender as FrameworkElement)?.Tag is not ExamEntry entry) return;
+        int i = examEntries.IndexOf(entry), j = i + delta;
+        if (j < 0 || j >= examEntries.Count) return;
+        examEntries.Move(i, j);
+    }
+
+    void EntryRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not ExamEntry entry) return;
+        // 이번 작업의 문항은 ③의 체크를 끄는 것과 같다(다시 체크하면 돌아온다).
+        if (entry.FromJob && results.FirstOrDefault(r => "job:" + r.Key == entry.Key) is { } r) r.Include = false;
+        else examEntries.Remove(entry);
+    }
+
+    void ClearExam_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var r in results) r.Include = false;
+        examEntries.Clear();
     }
 
     async void Render_Click(object sender, RoutedEventArgs e)
     {
-        if (job is null) return;
-        var j = job;
-        j.Job.Info.Title = TitleBox.Text.Trim();
-        j.Job.Info.Subject = SubjectBox.Text.Trim();
-        j.Job.Info.Grade = GradeBox.Text.Trim();
-        j.Job.Info.Date = DateBox.Text.Trim();
+        if (examEntries.Count == 0) { Status("④에 넣은 문항이 없습니다. ③에서 체크하거나 [문항함에서 넣기]를 하세요."); return; }
+        var info = new ExamInfo
+        {
+            Title = TitleBox.Text.Trim(), Subject = SubjectBox.Text.Trim(), Grade = GradeBox.Text.Trim(), Date = DateBox.Text.Trim(),
+        };
         var form = FormBox.SelectedItem as FormChoice;
-        j.Job.FormDir = form?.Dir == FormRendering.DefaultFormDir ? null : form?.Dir;
-        j.Save();
+        if (job is not null)
+        {
+            job.Job.Info = info;
+            job.Job.FormDir = form?.Dir == FormRendering.DefaultFormDir ? null : form?.Dir;
+            job.Save();
+        }
 
-        var exam = j.BuildExam(excluded);
+        var exam = new Exam { Info = info, Questions = examEntries.Select(x => x.Question).ToList() };
         var errors = ExamValidator.Validate(exam, expectedTotal: null).Where(i => i.Severity == Severity.Error).ToList();
         if (errors.Count > 0)
         {
             MessageBox.Show(this, string.Join("\n", errors), "시험지를 만들 수 없습니다", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        JsonStore.Save(Path.Combine(j.Dir, "시험.json"), exam);
-        var name = string.Concat((exam.Info.Title.Length > 0 ? exam.Info.Title : "시험지").Split(Path.GetInvalidFileNameChars()));
-        var output = Path.Combine(j.Dir, name + ".hwp");
+        var name = string.Concat((info.Title.Length > 0 ? info.Title : "시험지").Split(Path.GetInvalidFileNameChars()));
+        var dir = Path.Combine(ExamsDir, $"{DateTime.Now:yyyy-MM-dd HHmm} {name}");
+        Directory.CreateDirectory(dir);
+        JsonStore.Save(Path.Combine(dir, "시험.json"), exam);
+        var output = Path.Combine(dir, name + ".hwp");
         bool pdf = PdfCheck.IsChecked == true, answers = AnswersCheck.IsChecked == true;
-        var formDir = j.Job.FormDir ?? FormRendering.DefaultFormDir;
+        var formDir = form?.Dir ?? FormRendering.DefaultFormDir;
 
         await Run($"한글로 시험지를 만드는 중… ({exam.Questions.Count}문항, 한글 창은 닫아 두세요)", async _ =>
         {
             await Task.Run(() =>
             {
-                FormRendering.Render(exam, formDir, j.Dir, output, original: true, pdf: pdf);
+                FormRendering.Render(exam, formDir, dir, output, original: true, pdf: pdf);
                 if (!answers) return;
-                var ans = Path.Combine(j.Dir, name + "_정답.hwp");
+                var ans = Path.Combine(dir, name + "_정답.hwp");
                 using var session = new HwpSession();
                 new AnswerSheetRenderer(session).Render(exam, new TextStyle());
                 session.SaveAs(ans, HwpFormat.Hwp);
                 if (pdf) session.SaveAs(Path.ChangeExtension(ans, ".pdf"), HwpFormat.Pdf);
             });
-            Status($"시험지를 만들었습니다: {output} (원안지·{(answers ? "정답지·" : "")}PDF는 같은 폴더)");
+            Status($"시험지를 만들었습니다: {dir} (학생용·원안지{(answers ? "·정답지" : "")}{(pdf ? "·PDF" : "")})");
             var open = pdf ? Path.ChangeExtension(output, ".pdf") : output;
             Process.Start(new ProcessStartInfo(open) { UseShellExecute = true });
         });
@@ -381,7 +587,7 @@ public partial class MainWindow : Window
 
     void LoadForms()
     {
-        var forms = new List<FormChoice> { new("표준 시험지 양식(B4, 내장)", FormRendering.DefaultFormDir) };
+        var forms = new List<FormChoice> { new("표준(B4)", FormRendering.DefaultFormDir) };
         if (Directory.Exists(FormsDir))
             forms.AddRange(Directory.EnumerateDirectories(FormsDir).Where(FormRendering.IsFormDir).Select(d => new FormChoice(Path.GetFileName(d), d)));
         FormBox.ItemsSource = forms;
@@ -437,7 +643,7 @@ public partial class MainWindow : Window
     {
         Busy.Visibility = busy ? Visibility.Visible : Visibility.Hidden;
         CancelButton.IsEnabled = busy;
-        foreach (var b in new[] { FindButton, MakeButton, RenderButton }) b.IsEnabled = !busy;
+        foreach (var b in new[] { FindButton, MakeButton, RenderButton, ArchiveExamButton, ArchivePracticeButton }) b.IsEnabled = !busy;
     }
 
     void Cancel_Click(object sender, RoutedEventArgs e) => cts?.Cancel();
@@ -451,64 +657,5 @@ public partial class MainWindow : Window
             try { File.AppendAllText(Path.Combine(job.Dir, "log.txt"), $"{DateTime.Now:HH:mm:ss} {message}\n"); }
             catch (IOException) { }
         }
-    }
-
-    static ImageSource? LoadImage(string path)
-    {
-        if (!File.Exists(path)) return null;
-        try
-        {
-            var b = new BitmapImage();
-            b.BeginInit();
-            b.CacheOption = BitmapCacheOption.OnLoad;      // 파일을 잠그지 않게(다시 그리면 덮어쓰므로)
-            b.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
-            b.UriSource = new Uri(path);
-            b.EndInit();
-            b.Freeze();
-            return b;
-        }
-        catch (Exception ex) when (ex is NotSupportedException or IOException or InvalidOperationException) { return null; }
-    }
-
-    // ── 미리보기 글 ──────────────────────────────────────
-
-    static string Plain(string s) => s.Replace("**", "").Replace("__", "").Replace("\\$", "§").Replace("$", "").Replace("§", "$");
-
-    static string Body(Question q)
-    {
-        var sb = new StringBuilder();
-        if (q.Passage is { } p) foreach (var l in p.Lines) sb.AppendLine("  " + Plain(l));
-        if (q.StemAfter is { Length: > 0 } after) sb.AppendLine(Plain(after));
-        if (q.Box is { } box)
-        {
-            sb.AppendLine(box.Title.Length > 0 ? box.Title : "<보기>");
-            var labels = "ㄱㄴㄷㄹㅁㅂㅅ";
-            for (int i = 0; i < box.Lines.Count; i++)
-            {
-                var line = Plain(box.Lines[i]);
-                bool labelled = line.Length > 1 && labels.Contains(line[0]) && line[1] == '.';
-                sb.AppendLine($"  {(labelled || i >= labels.Length ? "" : labels[i] + ". ")}{line}");
-            }
-        }
-        if (q.Conditions is { } c)
-        {
-            sb.AppendLine(c.Title);
-            foreach (var l in c.Lines) sb.AppendLine("  " + Plain(l));
-        }
-        for (int i = 0; i < q.SubQuestions.Count; i++) sb.AppendLine($"({i + 1}) {Plain(q.SubQuestions[i].Text)} [{Format.Points(q.SubQuestions[i].Points)}점]");
-        if (q.Choices.Count > 0)
-            sb.AppendLine(string.Join("   ", q.Choices.Select((ch, i) => $"{Format.ChoiceMark(i + 1)} {Plain(ch)}")));
-        return sb.ToString().TrimEnd();
-    }
-
-    static string AnswerText(Question q)
-    {
-        var sb = new StringBuilder();
-        if (q.Answer.Count > 0) sb.Append("정답 " + string.Join(", ", q.Answer.Select(Format.ChoiceMark)));
-        else if (q.AnswerText is { Length: > 0 } a) sb.Append("모범 답안: " + Plain(a));
-        else if (q.SubQuestions.Count > 0)
-            sb.Append(string.Join("  ", q.SubQuestions.Select((s, i) => $"({i + 1}) {Plain(s.AnswerText ?? "")}")));
-        if (q.Explanation is { Length: > 0 } ex) sb.Append("\n해설: " + Plain(ex));
-        return sb.ToString();
     }
 }

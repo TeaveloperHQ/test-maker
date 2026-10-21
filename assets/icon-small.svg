@@ -1,0 +1,27 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Test Maker 아이콘 (작은 크기용 — 16~48px)
+    icon.svg 에서 글 줄과 접힌 귀를 빼고 시험지·죽방을 키웠다.
+    16px 에서 가는 줄은 뭉개지므로 흰 덩어리 둘(시험지, 죽방)만 남긴다.
+  -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="#6366f1"/>
+      <stop offset="50%"  stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="112" y="112" width="800" height="800" rx="184" fill="url(#g)"/>
+
+  <!-- 시험지 -->
+  <rect x="200" y="270" width="270" height="440" rx="44" fill="#ffffff"/>
+  <rect x="250" y="390" width="170" height="40" rx="20" fill="#8b5cf6"/>
+  <rect x="250" y="490" width="170" height="40" rx="20" fill="#8b5cf6"/>
+
+  <!-- 죽방 — 원 r100 · 밑변 230 · 높이 210 -->
+  <g fill="#ffffff">
+    <circle cx="672" cy="380" r="100"/>
+    <path d="M672 446 L557 666 L787 666 Z"/>
+  </g>
+</svg>

@@ -14,9 +14,11 @@ public abstract class Observable : INotifyPropertyChanged
     {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        OnChanged(name);
         return true;
     }
+
+    protected void OnChanged(string? name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
 /// <summary>
@@ -33,12 +35,13 @@ public sealed class AuthoringJob
 
     public List<SourceFile> Sources { get; set; } = [];
     public List<FoundQuestion> Questions { get; set; } = [];
-    public string Style { get; set; } = VariantStyle.Auto;
-    /// <summary>선생님의 추가 요청(예: "난이도를 조금 높여 줘").</summary>
+    /// <summary>선생님의 추가 요청(예: "난이도를 조금 높여 줘"). 모든 문항에 적용.</summary>
     public string Request { get; set; } = "";
     public ExamInfo Info { get; set; } = new();
     /// <summary>시험지 양식 폴더. null이면 내장 기본 양식.</summary>
     public string? FormDir { get; set; }
+    /// <summary>문항함에 보관한 결과: "q01/0" → 칸 이름("시험용"/"예상문제"). 같은 문항을 두 번 보관하지 않게.</summary>
+    public Dictionary<string, string> Archived { get; set; } = [];
 }
 
 public sealed class SourceFile
@@ -82,6 +85,10 @@ public sealed class FoundQuestion : Observable
     /// <summary>만들 변형 문항 수.</summary>
     public int Variants { get => variants; set => Set(ref variants, Math.Clamp(value, 0, 10)); }
 
+    string style = VariantStyle.Auto;
+    /// <summary>이 문항의 변형 방식(<see cref="VariantStyle"/>).</summary>
+    public string Style { get => style; set => Set(ref style, value); }
+
     bool keepOriginal;
     /// <summary>원래 문항도 그대로 옮겨 넣을지.</summary>
     public bool KeepOriginal { get => keepOriginal; set => Set(ref keepOriginal, value); }
@@ -92,6 +99,9 @@ public sealed class FoundQuestion : Observable
 
     [JsonIgnore]
     public string TypeText => Type switch { QuestionType.Essay => "서술형", QuestionType.ShortAnswer => "단답형", _ => "선택형" };
+
+    [JsonIgnore]
+    public string FigureText => HasFigure ? " · 그림 있음" : "";
 
     public int ExpectedCount => Variants + (KeepOriginal ? 1 : 0);
     public string ItemFile => Path.Combine(AuthoringJob.ItemsDir, Id + ".json");

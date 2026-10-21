@@ -59,7 +59,7 @@ public static class Prompts
         if (q.KeepOriginal) sb.AppendLine("- 첫 문항: 원래 문항을 그대로 옮긴 것(글, 그림, 선택지, 정답 모두 원래대로).");
         if (q.Variants > 0)
         {
-            sb.AppendLine($"- 변형 문항 {q.Variants}개. 변형 방식: {job.Style}{StyleHint(job.Style)}");
+            sb.AppendLine($"- 변형 문항 {q.Variants}개. 변형 방식: {q.Style}{StyleHint(q.Style)}");
             sb.AppendLine("  변형끼리도 서로 달라야 한다(숫자·상황·정답 번호가 겹치지 않게).");
         }
         if (!string.IsNullOrWhiteSpace(job.Request)) sb.AppendLine($"- 선생님 요청: {job.Request.Trim()}");
@@ -129,7 +129,8 @@ public static class Prompts
             "box": { "lines": ["A의 온도는 시간이 지날수록 낮아진다.", "…"] }, // <보기>. ㄱ. ㄴ. 은 쓰지 않는다(자동)
             "choices": ["ㄱ", "ㄴ", "ㄱ, ㄴ", "ㄴ, ㄷ", "ㄱ, ㄴ, ㄷ"],     // ①② 기호는 쓰지 않는다(자동)
             "answer": [3],                                  // 정답 번호(1부터)
-            "explanation": "풀이"
+            "explanation": "풀이",
+            "meta": { "unit": "열과 우리 생활 - 열평형", "difficulty": "중" }   // 단원(교과서 단원명), 난이도 상/중/하 — 문항함에서 찾을 때 쓴다
           },
           {
             "type": "Essay",
@@ -141,7 +142,14 @@ public static class Prompts
           }
         ]}
         ```
-        글 안 표기: 수식은 한글 수식 문법으로 `$E = {1} over {2} mv^2$`(단위·간단한 숫자는 그냥 글자로 "6 N"),
-        굵게 `**않는**`, 밑줄 `__㉠__`. 글자 그대로의 $ * _ 는 앞에 \ 를 붙인다.
+        글 안 표기: 굵게 `**않는**`, 밑줄 `__㉠__`. 글자 그대로의 $ * _ 는 앞에 \ 를 붙인다.
+
+        수식(한글 수식 편집기 문법, `$…$`) 규칙 — 시험지에서 그대로 수식 개체가 된다:
+        - 분수는 분자·분모를 반드시 중괄호로: `${1} over {4}$`, `${F} over {2}$`, `${3} over {4} F$`.
+          (`$3 over 4$F`처럼 분수 뒤에 글자를 수식 밖에 붙이지 마라 — 분모인지 아닌지 헷갈린다.)
+        - 변수(W, F, m, v …)가 들어간 식은 **식 전체를 하나의 수식으로**: `$W - {F} over {2} = 9$ N`.
+          글자 W와 수식을 섞어 `W − $F over 2$` 처럼 쓰지 마라(글꼴이 섞인다). 수식 바로 앞뒤에 영문자·숫자를 붙이지 마라.
+        - 곱하기 `TIMES`, 나누기 `DIV`, 위첨자 `v^2`, 아래첨자 `F_1`, 제곱근 `sqrt {2}`.
+        - 단위는 수식 밖에 글자로 둔다("6 N", "$W = 12$ N"). 분수·변수가 없는 숫자는 수식으로 만들지 말고 글자로("3 N").
         """;
 }

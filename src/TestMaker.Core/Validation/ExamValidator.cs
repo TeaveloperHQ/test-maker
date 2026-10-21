@@ -37,7 +37,12 @@ public static class ExamValidator
 
             foreach (var text in AllText(q))
             {
-                try { InlineMarkup.Parse(text); }
+                try
+                {
+                    InlineMarkup.Parse(text);
+                    foreach (var eq in InlineMarkup.GluedEquations(text))
+                        Warn($"수식 ${eq}$ 앞뒤에 글자가 붙어 있습니다. 변수·숫자가 섞인 식은 식 전체를 하나의 수식으로 쓰세요(예: $W - {{F}} over {{2}} = 9$).");
+                }
                 catch (FormatException e) { Err(e.Message); }
             }
 
@@ -78,5 +83,9 @@ public static class ExamValidator
         if (q.Passage is not null) foreach (var l in q.Passage.Lines) yield return l;
         if (q.Conditions is not null) foreach (var l in q.Conditions.Lines) yield return l;
         foreach (var s in q.SubQuestions) yield return s.Text;
+        // 정답·해설지에 나가는 글
+        if (q.Explanation is not null) yield return q.Explanation;
+        if (q.AnswerText is not null) yield return q.AnswerText;
+        foreach (var s in q.SubQuestions) if (s.AnswerText is not null) yield return s.AnswerText;
     }
 }

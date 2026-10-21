@@ -48,6 +48,31 @@ public sealed class InlineMarkupTests
         Assert.Throws<FormatException>(() => InlineMarkup.Parse(source));
     }
 
+    /// <summary>실제로 나온 표기: 분수 뒤에 변수를 수식 밖에 붙이거나, 식을 글자와 수식으로 쪼갬.</summary>
+    [Theory]
+    [InlineData("$3 over 4$F = 6 N", "3 over 4")]
+    [InlineData("W − $F over 2$ = 9 N", null)]          // 띄어 쓰면 붙은 것은 아니다(글꼴은 섞이지만 읽기는 됨)
+    [InlineData("W$-F$", "-F")]
+    [InlineData("부피의 ${1} over {4}$만", null)]       // 한글이 붙는 것은 괜찮다(조사)
+    public void Finds_letters_glued_to_equations(string source, string? glued)
+    {
+        var found = InlineMarkup.GluedEquations(source).ToList();
+        if (glued is null) Assert.Empty(found);
+        else Assert.Equal([glued], found);
+    }
+
+    [Theory]
+    [InlineData("부피의 $1 over 4$만", "부피의 1/4만")]
+    [InlineData("${3} over {4} F$", "3/4 F")]
+    [InlineData("$W - {F} over {2} = 9$ N", "W - F/2 = 9 N")]
+    [InlineData("$E = {1} over {2} mv^2$", "E = 1/2 mv²")]
+    [InlineData("${a+b} over {2}$", "(a+b)/2")]
+    [InlineData("$2 TIMES 3$", "2 × 3")]
+    public void Plain_preview_reads_equations(string source, string plain)
+    {
+        Assert.Equal(plain, InlineMarkup.ToPlain(source));
+    }
+
     [Fact]
     public void Width_counts_hangul_full_and_ascii_half()
     {

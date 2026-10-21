@@ -7,7 +7,14 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>TestMaker</AssemblyName>
     <RootNamespace>TestMaker.App</RootNamespace>
+    <!-- 아이콘: assets/icon.svg·icon-small.svg → tools/build-icon.ps1 → assets/icon.ico (teaveloper 공용 규격) -->
+    <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\assets\icon.ico" Link="icon.ico" />
+    <Resource Include="..\..\assets\icon-128.png" Link="icon-128.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\TestMaker.Core\TestMaker.Core.csproj" />

@@ -124,7 +124,6 @@ static async Task<int> Author(string dir, string[] rest)
     void Log(string m) => Console.WriteLine($"  … {m}");
 
     foreach (var f in files) Console.WriteLine($"자료: {a.AddSource(f).Name}");
-    a.Job.Style = opts.Value("--style") ?? VariantStyle.Auto;
     a.Job.Request = opts.Value("--request") ?? "";
     a.Job.FormDir = opts.Value("-t");
     var found = await a.FindQuestionsAsync(Log);
@@ -132,6 +131,7 @@ static async Task<int> Author(string dir, string[] rest)
     {
         q.Variants = int.Parse(opts.Value("-n") ?? "1");
         q.KeepOriginal = opts.Has("--keep");
+        q.Style = opts.Value("--style") ?? VariantStyle.Auto;
         Console.WriteLine($"{q.Id}  {q.Number}번 [{q.TypeText}{(q.HasFigure ? ", 그림" : "")}] {q.Summary}");
     }
     a.Save();

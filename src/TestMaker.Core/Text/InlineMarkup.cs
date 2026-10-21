@@ -68,6 +68,53 @@ public static class InlineMarkup
         ? s.Text.Sum(c => c < 'ᄀ' ? 0.5 : 1.0)
         : Math.Max(1.0, s.Text.Count(char.IsLetterOrDigit) * 0.5));
 
+    /// <summary>
+    /// 수식 바로 앞뒤에 영문자·숫자가 붙은 곳(예: "$3 over 4$F", "W$-F$"). 한 식이 글자와 수식으로 쪼개져
+    /// 글꼴이 섞이고, 분수 뒤에 붙은 글자는 분모인지 아닌지 헷갈린다 → 식 전체를 하나의 수식으로 써야 한다.
+    /// </summary>
+    public static IEnumerable<string> GluedEquations(string source)
+    {
+        var segs = Parse(source);
+        for (int i = 0; i < segs.Count; i++)
+        {
+            if (segs[i].Kind != SegmentKind.Equation) continue;
+            bool before = i > 0 && segs[i - 1].Kind == SegmentKind.Text && IsGlue(segs[i - 1].Text[^1]);
+            bool after = i + 1 < segs.Count && segs[i + 1].Kind == SegmentKind.Text && IsGlue(segs[i + 1].Text[0]);
+            if (before || after) yield return segs[i].Text;
+        }
+
+        static bool IsGlue(char c) => c is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9');
+    }
+
+    /// <summary>표기를 걷어 내고 수식은 읽을 수 있는 글로 바꾼 글(미리보기용). 예: "부피의 ${1} over {4}$" → "부피의 1/4".</summary>
+    public static string ToPlain(string source)
+    {
+        try
+        {
+            return string.Concat(Parse(source).Select(s => s.Kind == SegmentKind.Text ? s.Text : EquationToPlain(s.Text)));
+        }
+        catch (FormatException) { return source; }
+    }
+
+    /// <summary>한글 수식 스크립트를 대강 읽을 수 있는 글로(완벽한 변환이 아니라 미리보기용).</summary>
+    public static string EquationToPlain(string script)
+    {
+        var s = " " + script + " ";
+        // 분수: {a} over {b} 또는 a over b → a/b (괄호가 필요하면 둔다)
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"(\{[^{}]*\}|[^\s{}]+)\s+over\s+(\{[^{}]*\}|[^\s{}]+)", m =>
+        {
+            string Part(string p) { var t = p.Trim('{', '}').Trim(); return t.Contains(' ') || t.Contains('+') || t.Contains('-') ? $"({t})" : t; }
+            return Part(m.Groups[1].Value) + "/" + Part(m.Groups[2].Value);
+        }, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        foreach (var (k, v) in new[] { ("TIMES", "×"), ("DIV", "÷"), ("CDOT", "·"), ("LEQ", "≤"), ("GEQ", "≥"), ("NEQ", "≠"), ("APPROX", "≈"), ("ALPHA", "α"), ("BETA", "β"), ("theta", "θ"), ("DELTA", "Δ"), ("rightarrow", "→"), ("->", "→"), ("deg", "°") })
+            s = System.Text.RegularExpressions.Regex.Replace(s, $@"(?<![A-Za-z]){System.Text.RegularExpressions.Regex.Escape(k)}(?![A-Za-z])", v, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"sqrt\s*\{([^{}]*)\}", "√($1)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"(?<![A-Za-z])(rm|it|bold|LEFT|RIGHT)(?![A-Za-z])", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        s = s.Replace("^2", "²").Replace("^{2}", "²").Replace("^3", "³").Replace("^{3}", "³")
+             .Replace("{", "").Replace("}", "").Replace("~", " ").Replace("`", "");
+        return System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+    }
+
     static bool At(string s, int i, char c) => i < s.Length && s[i] == c;
 
     static int FindUnescaped(string s, char c, int from)
