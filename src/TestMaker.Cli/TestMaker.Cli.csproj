@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\TestMaker.Core\TestMaker.Core.csproj" />
     <ProjectReference Include="..\TestMaker.Hwp\TestMaker.Hwp.csproj" />
+    <ProjectReference Include="..\TestMaker.Ai\TestMaker.Ai.csproj" />
   </ItemGroup>
 
 </Project>

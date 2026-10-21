@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/TestMaker.Ai/TestMaker.Ai.csproj" />
+    <Project Path="src/TestMaker.App/TestMaker.App.csproj" />
     <Project Path="src/TestMaker.Cli/TestMaker.Cli.csproj" />
     <Project Path="src/TestMaker.Core/TestMaker.Core.csproj" />
     <Project Path="src/TestMaker.Hwp/TestMaker.Hwp.csproj" />

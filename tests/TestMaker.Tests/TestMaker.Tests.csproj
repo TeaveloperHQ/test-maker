@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\TestMaker.Core\TestMaker.Core.csproj" />
     <ProjectReference Include="..\..\src\TestMaker.Hwp\TestMaker.Hwp.csproj" />
+    <ProjectReference Include="..\..\src\TestMaker.Ai\TestMaker.Ai.csproj" />
   </ItemGroup>
 
 </Project>

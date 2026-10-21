@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 문항 찾기·변형 만들기: 설치된 Claude Code(claude.exe)를 뒤에서 불러 쓴다(사용자의 Claude 구독). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TestMaker.Core\TestMaker.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using TestMaker.Ai;
 using TestMaker.Core.Forms;
 using TestMaker.Core.Models;
 using TestMaker.Core.Serialization;
@@ -29,6 +30,11 @@ const string Usage = """
           --answers       정답 및 해설 파일(…_정답.hwp)도 저장
           --show          한글 창을 보이게 (확인용)
 
+      author <작업폴더> <자료 …> [-n 변형수] [--keep] [--style 방식] [--request 요청] [-t 양식폴더]
+          자료(그림·PDF·한글 파일)에서 문항을 찾아 변형 문항을 만들고 시험지를 출력한다(Claude Code 필요).
+          -n        문항마다 만들 변형 수(기본 1)    --keep   원래 문항도 넣기
+          --style   알아서 | 숫자만 바꾸기 | 상황·소재 바꾸기 | 더 어렵게 | 더 쉽게
+
       build-default-form <폴더>
           (개발용) 내장 기본 양식을 한글로 다시 만든다. 저장소의 forms/default를 갱신할 때 쓴다.
     """;
@@ -42,6 +48,7 @@ try
         ["render", var path, .. var rest] => Render(path, rest),
         ["learn", var src, var dir, .. var rest] => Learn(src, dir, rest),
         ["build-default-form", var dir] => BuildDefaultForm(dir),
+        ["author", var dir, .. var rest] when rest.Length > 0 => await Author(dir, rest),
         _ => Help(),
     };
 }
@@ -105,6 +112,41 @@ static int Render(string path, string[] rest)
         Console.WriteLine($"정답지: {answers}");
         if (opts.Has("--pdf")) session.SaveAs(Path.ChangeExtension(answers, ".pdf"), HwpFormat.Pdf);
     }
+    return 0;
+}
+
+static async Task<int> Author(string dir, string[] rest)
+{
+    var files = rest.TakeWhile(a => !a.StartsWith('-')).ToList();
+    var opts = Options.Parse(rest[files.Count..], valued: ["-n", "--style", "--request", "-t"], flags: ["--keep"]);
+    var exe = ClaudeCode.Find() ?? throw new InvalidOperationException("Claude Code(claude.exe)를 찾지 못했습니다. 설치하고 로그인하세요.");
+    var a = Authoring.Open(new ClaudeCode(exe), dir, HwpSource.Convert);
+    void Log(string m) => Console.WriteLine($"  … {m}");
+
+    foreach (var f in files) Console.WriteLine($"자료: {a.AddSource(f).Name}");
+    a.Job.Style = opts.Value("--style") ?? VariantStyle.Auto;
+    a.Job.Request = opts.Value("--request") ?? "";
+    a.Job.FormDir = opts.Value("-t");
+    var found = await a.FindQuestionsAsync(Log);
+    foreach (var q in found)
+    {
+        q.Variants = int.Parse(opts.Value("-n") ?? "1");
+        q.KeepOriginal = opts.Has("--keep");
+        Console.WriteLine($"{q.Id}  {q.Number}번 [{q.TypeText}{(q.HasFigure ? ", 그림" : "")}] {q.Summary}");
+    }
+    a.Save();
+    foreach (var q in found)
+    {
+        var items = await a.MakeVariantsAsync(q, Log);
+        Console.WriteLine($"{q.Number}번: {items.Count}문항 완료");
+    }
+
+    var exam = a.BuildExam();
+    var examPath = Path.Combine(a.Dir, "시험.json");
+    JsonStore.Save(examPath, exam);
+    var output = Path.Combine(a.Dir, "시험지.hwp");
+    var rendered = FormRendering.Render(exam, a.Job.FormDir ?? FormRendering.DefaultFormDir, a.Dir, output, original: true, pdf: true);
+    foreach (var r in rendered) Console.WriteLine($"{r.Path} ({r.Pages}쪽)");
     return 0;
 }
 
