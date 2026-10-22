@@ -46,14 +46,25 @@ public sealed class AuthoringJob
     public ExamInfo Info { get; set; } = new();
     /// <summary>시험지 양식 폴더. null이면 내장 기본 양식.</summary>
     public string? FormDir { get; set; }
-    /// <summary>문항함에 보관한 결과: "q01/0" → 칸 이름("시험용"/"예상문제"). 같은 문항을 두 번 보관하지 않게.</summary>
+    /// <summary>③에서 정한 결과의 행선지: "q01/0" → <see cref="Destination.Exam"/> 또는 <see cref="Destination.Practice"/>. 없으면 버림.</summary>
+    public Dictionary<string, string> Destinations { get; set; } = [];
+    /// <summary>행선지를 정한 결과가 자동으로 들어간 문항함 폴더: "q01/0" → 폴더.</summary>
     public Dictionary<string, string> Archived { get; set; } = [];
-    /// <summary>③에서 체크를 끈 결과("q01/0"). 끈 것은 ④ 시험지에도 들어가지 않는다.</summary>
-    public List<string> Excluded { get; set; } = [];
-    /// <summary>④ 시험지에 넣은 문항과 그 순서.</summary>
+    /// <summary>④ 시험지 탭의 문항과 순서.</summary>
     public List<ExamListEntry> ExamList { get; set; } = [];
+    /// <summary>④ 예상문제 탭의 문항과 순서.</summary>
+    public List<ExamListEntry> PracticeList { get; set; } = [];
+    /// <summary>예상문제지 제목(비어 있으면 "작업 이름 예상문제").</summary>
+    public string PracticeTitle { get; set; } = "";
     public bool Pdf { get; set; } = true;
     public bool Answers { get; set; } = true;
+}
+
+/// <summary>③에서 결과를 보낼 곳. ④의 두 탭.</summary>
+public static class Destination
+{
+    public const string Exam = "시험지";
+    public const string Practice = "예상문제";
 }
 
 /// <summary>④ 시험지 목록의 한 줄(저장용). 이번 작업의 결과("job:q01/0")이거나 문항함의 문항("bank:id").</summary>
@@ -65,7 +76,7 @@ public sealed class ExamListEntry
 }
 
 /// <summary>작업 목록에 보일 요약.</summary>
-public sealed record JobSummary(string Dir, string Name, DateTime Modified, int Sources, int Questions, int ExamQuestions);
+public sealed record JobSummary(string Dir, string Name, DateTime Modified, int Sources, int Questions, int ExamQuestions, int PracticeQuestions = 0);
 
 public sealed class SourceFile
 {
@@ -77,6 +88,8 @@ public sealed class SourceFile
     public List<string> ReadFiles { get; set; } = [];
     /// <summary>한글 파일 안에 들어 있던 그림(작업 폴더 기준). 그림을 그대로 따라 그릴 때 원본으로 쓴다.</summary>
     public List<string> Figures { get; set; } = [];
+    /// <summary>이 자료에서 문항을 찾았는지. [문항 찾기]는 아직 안 찾은 자료만 읽는다.</summary>
+    public bool Analyzed { get; set; }
 }
 
 public static class VariantStyle

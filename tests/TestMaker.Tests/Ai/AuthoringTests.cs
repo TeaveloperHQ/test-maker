@@ -48,9 +48,11 @@ public sealed class AuthoringTests : IDisposable
         Assert.EndsWith("2026 2학기 1차고사 (2)", b.Dir);
 
         a.Job.Info.Title = "2026학년도 2학기 1차 지필평가";
-        a.Job.Excluded.Add("q01/1");
+        a.Job.Destinations["q01/0"] = Destination.Exam;
+        a.Job.Destinations["q01/1"] = Destination.Practice;
         a.Job.ExamList.Add(new ExamListEntry { Key = "bank:abc", BankDir = @"C:\문항함\시험용\abc" });
         a.Job.ExamList.Add(new ExamListEntry { Key = "job:q01/0" });
+        a.Job.PracticeList.Add(new ExamListEntry { Key = "job:q01/1" });
         a.Save();
         File.SetLastWriteTime(Path.Combine(b.Dir, AuthoringJob.FileName), DateTime.Now.AddDays(-1));
 
@@ -62,9 +64,88 @@ public sealed class AuthoringTests : IDisposable
         var back = Authoring.Open(null, a.Dir);
         Assert.Equal("2026 2학기 1차고사", back.Name);
         Assert.Equal("2026학년도 2학기 1차 지필평가", back.Job.Info.Title);
-        Assert.Equal(["q01/1"], back.Job.Excluded);
+        Assert.Equal(Destination.Practice, back.Job.Destinations["q01/1"]);
         Assert.Equal(["bank:abc", "job:q01/0"], back.Job.ExamList.Select(e => e.Key));
+        Assert.Equal(["job:q01/1"], back.Job.PracticeList.Select(e => e.Key));
+        Assert.Equal(1, list[0].PracticeQuestions);
     }
+
+    [Fact]
+    public void Edit_renames_job_and_folder_and_duplicate_skips_made_exams()
+    {
+        var root = Path.Combine(dir, "작업");
+        var a = Authoring.Create(null, root, "1차고사");
+        a.AddSource(MakeFile("문항.png"));
+        Directory.CreateDirectory(Path.Combine(a.Dir, AuthoringJob.ExamsDir, "2026-10-22 0900"));
+        File.WriteAllText(Path.Combine(a.Dir, AuthoringJob.ExamsDir, "2026-10-22 0900", "시험.hwp"), "x");
+
+        var renamed = Authoring.Edit(a.Dir, "2026 2학기 1차고사", grade: "3학년", subject: "과학");
+        Assert.EndsWith("2026 2학기 1차고사", renamed);
+        Assert.False(Directory.Exists(a.Dir));
+        var back = Authoring.Open(null, renamed);
+        Assert.Equal("2026 2학기 1차고사", back.Name);
+        Assert.Equal("3학년", back.Job.Info.Grade);
+        Assert.Equal(renamed, Authoring.Edit(renamed, "2026 2학기 1차고사"));      // 같은 이름이면 그대로
+
+        var copy = Authoring.Duplicate(renamed, "2027 2학기 1차고사");
+        Assert.Equal("2027 2학기 1차고사", Authoring.Open(null, copy).Name);
+        Assert.True(File.Exists(Path.Combine(copy, "sources", "문항.png")));
+        Assert.False(Directory.Exists(Path.Combine(copy, AuthoringJob.ExamsDir)));   // 만든 시험지는 복사하지 않음
+    }
+
+    /// <summary>③ 행선지: 시험지·예상문제로 보내면 문항함에 들어가고, 바꾸면 칸을 옮기고, 버리면 문항함에서도 빠진다.</summary>
+    [Fact]
+    public void Destination_files_into_bank_moves_and_discards()
+    {
+        var bank = new TestMaker.Core.Bank.QuestionBank(Path.Combine(dir, "문항함"));
+        var root = Path.Combine(dir, "작업");
+        var a = Authoring.Create(null, root, "1차고사");
+        var q = new FoundQuestion { Id = "q01", Number = "7", Summary = "열평형", Variants = 2 };
+        a.Job.Questions.Add(q);
+        WriteItems(a, q, [Mc("가"), Mc("나")]);
+
+        a.SetDestination(q, 0, Destination.Exam, bank, root);
+        a.SetDestination(q, 1, Destination.Practice, bank, root);
+        Assert.Equal(Destination.Exam, a.DestinationOf(q, 0));
+        var items = bank.Load();
+        Assert.Equal(2, items.Count);
+        Assert.Contains(items, i => i.Category == TestMaker.Core.Bank.BankCategory.Exam && i.Title == "7번 변형 1 · 열평형");
+
+        a.SetDestination(q, 0, Destination.Practice, bank, root);              // 바꾸면 칸을 옮긴다(새로 넣지 않음)
+        Assert.Equal(2, bank.Load().Count(i => i.Category == TestMaker.Core.Bank.BankCategory.Practice));
+
+        a.SetDestination(q, 1, null, bank, root);                               // 버리면 문항함에서도 빠진다
+        Assert.Null(a.DestinationOf(q, 1));
+        Assert.Single(bank.Load());
+
+        // 다른 작업이 쓰고 있는 문항함 문항은 버려도 남긴다.
+        var other = Authoring.Create(null, root, "예상문제 모음");
+        other.Job.PracticeList.Add(new ExamListEntry { Key = "bank:x", BankDir = a.Job.Archived["q01/0"] });
+        other.Save();
+        a.SetDestination(q, 0, null, bank, root);
+        Assert.Single(bank.Load());
+        Assert.Empty(a.Job.Archived);
+    }
+
+    [Fact]
+    public void Old_jobs_are_migrated_and_finding_skips_analyzed_sources()
+    {
+        var a = Authoring.Create(null, Path.Combine(dir, "작업"), "예전 작업");
+        a.AddSource(MakeFile("문항.png"));
+        a.Job.Questions.Add(new FoundQuestion { Id = "q01", Source = "문항.png" });
+        a.Job.ExamList.Add(new ExamListEntry { Key = "job:q01/0" });
+        a.Job.Archived["q01/0"] = "시험용";                                     // 예전에는 칸 이름을 적었다
+        a.Save();
+
+        var back = Authoring.Open(null, a.Dir);
+        Assert.True(back.Job.Sources[0].Analyzed);                              // 이미 찾은 자료
+        Assert.Equal(Destination.Exam, back.Job.Destinations["q01/0"]);         // ④에 있던 것 → 시험지
+        Assert.Empty(back.Job.Archived);
+        Assert.Empty(back.FindQuestionsAsync().Result);                         // 새 자료가 없으면 Claude 없이 끝
+    }
+
+    void WriteItems(Authoring a, FoundQuestion q, List<Question> items) =>
+        JsonStore.Save(Path.Combine(a.Dir, q.ItemFile), new Exam { Questions = items });
 
     [Fact]
     public void Without_claude_only_finding_and_making_fail()

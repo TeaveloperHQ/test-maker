@@ -50,11 +50,11 @@
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="240" />
         <ColumnDefinition Width="16" />
-        <ColumnDefinition Width="1.45*" />
+        <ColumnDefinition Width="1.4*" />
         <ColumnDefinition Width="16" />
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="16" />
-        <ColumnDefinition Width="330" />
+        <ColumnDefinition Width="310" />
       </Grid.ColumnDefinitions>
 
       <!-- ① 자료 -->
@@ -67,7 +67,7 @@
             <TextBlock Text="자료" Style="{StaticResource StepTitle}" />
           </StackPanel>
           <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,12"
-                     Text="참고할 문항의 그림·PDF·한글 파일을 넣으세요. 화면 캡처(Win+Shift+S) 뒤 Ctrl+V도 됩니다." />
+                     Text="참고할 문항의 그림·PDF·한글 파일을 넣으세요(캡처 뒤 Ctrl+V도 됨). 언제든 더 넣거나 뺄 수 있고, [문항 찾기]는 새로 넣은 자료만 읽습니다." />
           <Button DockPanel.Dock="Bottom" x:Name="FindButton" Content="문항 찾기" Style="{StaticResource Primary}" Click="Find_Click" Margin="0,12,0,0" />
           <UniformGrid DockPanel.Dock="Bottom" Rows="1" Margin="0,12,0,0">
             <Button Content="파일 추가" Click="AddFiles_Click" Padding="2,6" FontSize="12.5" Margin="0,0,4,0" />
@@ -77,11 +77,34 @@
           <Grid>
             <Rectangle RadiusX="12" RadiusY="12" Fill="{StaticResource GradSoft}" Stroke="{StaticResource LineStrong}"
                        StrokeThickness="1.5" StrokeDashArray="4 3" />
-            <ListBox x:Name="SourceList" Style="{StaticResource SoftList}" Margin="8" AllowDrop="True"
+            <ListBox x:Name="SourceList" Style="{StaticResource SoftList}" Margin="8" AllowDrop="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      Drop="Sources_Drop" DragOver="Sources_DragOver" SelectionChanged="SourceList_SelectionChanged">
+              <ListBox.ContextMenu>
+                <ContextMenu>
+                  <MenuItem Header="이 자료에서 문항 다시 찾기" Click="RefindSource_Click" />
+                  <Separator />
+                  <MenuItem Header="자료 빼기…" Click="RemoveSource_Click" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
               <ListBox.ItemTemplate>
                 <DataTemplate>
-                  <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                  <StackPanel>
+                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock FontSize="11.5">
+                      <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource Hint}">
+                          <Setter Property="Text" Value="새 자료 · [문항 찾기]를 누르세요" />
+                          <Setter Property="Foreground" Value="{StaticResource Accent}" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding Analyzed}" Value="True">
+                              <Setter Property="Text" Value="문항 찾음" />
+                              <Setter Property="Foreground" Value="{StaticResource Muted}" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </TextBlock.Style>
+                    </TextBlock>
+                  </StackPanel>
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
@@ -130,6 +153,21 @@
             <DataGrid x:Name="QuestionGrid" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
                       CanUserResizeRows="False" MinRowHeight="36" SelectionMode="Single" SelectionUnit="Cell"
                       PreviewKeyDown="QuestionGrid_PreviewKeyDown">
+              <!-- 자료별로 묶어 보인다 -->
+              <DataGrid.GroupStyle>
+                <GroupStyle>
+                  <GroupStyle.HeaderTemplate>
+                    <DataTemplate>
+                      <Border Background="{StaticResource GradSoft}" Padding="10,6" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,1">
+                        <TextBlock>
+                          <Run Text="📄" /> <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource Accent}" />
+                          <Run Text="{Binding ItemCount, Mode=OneWay, StringFormat='  · 문항 {0}개'}" Foreground="{StaticResource Muted}" />
+                        </TextBlock>
+                      </Border>
+                    </DataTemplate>
+                  </GroupStyle.HeaderTemplate>
+                </GroupStyle>
+              </DataGrid.GroupStyle>
               <DataGrid.Columns>
                 <DataGridCheckBoxColumn Header="사용" Binding="{Binding Include, UpdateSourceTrigger=PropertyChanged}" Width="40" />
                 <DataGridTextColumn Header="번호" Binding="{Binding Number}" IsReadOnly="True" Width="40" />
@@ -146,7 +184,7 @@
                   </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
                 <DataGridCheckBoxColumn Header="원문항" Binding="{Binding KeepOriginal, UpdateSourceTrigger=PropertyChanged}" Width="50" />
-                <DataGridTemplateColumn Header="변형 방식" Width="118">
+                <DataGridTemplateColumn Header="변형 방식" Width="108">
                   <DataGridTemplateColumn.CellTemplate>
                     <DataTemplate>
                       <ComboBox SelectedItem="{Binding Style, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{x:Static local:Choices.Styles}"
@@ -199,42 +237,54 @@
         </DockPanel>
       </Border>
 
-      <!-- ③ 결과 확인과 보관 -->
+      <!-- ③ 결과 확인: 문항마다 시험지 / 예상문제 / 버림 -->
       <Border Grid.Column="4" Style="{StaticResource Card}">
         <DockPanel>
           <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
             <Border Style="{StaticResource StepBadge}">
               <TextBlock Text="3" Foreground="White" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
-            <TextBlock Text="결과 확인과 보관" Style="{StaticResource StepTitle}" />
+            <TextBlock Text="결과 확인과 행선지" Style="{StaticResource StepTitle}" />
           </StackPanel>
-          <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,12"
-                     Text="체크한 문항이 ④ 시험지에 들어갑니다. 모아 두었다가 나중에 쓰려면 문항함에 보관하세요." />
-
-          <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
-            <UniformGrid Rows="1">
-              <Button x:Name="ArchiveExamButton" Content="시험용으로 보관" Style="{StaticResource Primary}" Click="ArchiveExam_Click" Margin="0,0,6,0" Padding="8,11" />
-              <Button x:Name="ArchivePracticeButton" Content="예상문제로 보관" Click="ArchivePractice_Click" Margin="0" FontWeight="SemiBold"
-                      Foreground="{StaticResource Accent}" BorderBrush="{StaticResource Accent}" />
-            </UniformGrid>
-          </StackPanel>
+          <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,8"
+                     Text="문항마다 시험지·예상문제 중 어디로 보낼지 고르세요. 고르지 않은 문항은 버려집니다. 보낸 문항은 문항함에도 자동으로 모입니다." />
+          <Border DockPanel.Dock="Top" Style="{StaticResource Panel}" Padding="10,6" Margin="0,0,0,10">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="모두" Style="{StaticResource Label}" />
+                <Button Content="시험지로" Style="{StaticResource SmallButton}" Click="AllExam_Click" Foreground="{StaticResource ExamColor}" />
+                <Button Content="예상문제로" Style="{StaticResource SmallButton}" Click="AllPractice_Click" Foreground="{StaticResource PracticeColor}" />
+                <Button Content="버림" Style="{StaticResource SmallButton}" Click="AllNone_Click" />
+              </StackPanel>
+              <TextBlock x:Name="DestSummary" Style="{StaticResource Hint}" Margin="0,4,0,0" />
+            </StackPanel>
+          </Border>
 
           <ScrollViewer VerticalScrollBarVisibility="Auto">
             <ItemsControl x:Name="ResultList">
+              <ItemsControl.GroupStyle>
+                <GroupStyle>
+                  <GroupStyle.HeaderTemplate>
+                    <DataTemplate>
+                      <TextBlock Margin="2,4,0,8">
+                        <Run Text="📄" /> <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource Accent}" />
+                      </TextBlock>
+                    </DataTemplate>
+                  </GroupStyle.HeaderTemplate>
+                </GroupStyle>
+              </ItemsControl.GroupStyle>
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                  <Border Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                  <Border x:Name="card" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="1"
                           CornerRadius="10" Padding="14,12" Margin="0,0,4,10">
                     <StackPanel>
-                      <DockPanel Margin="0,0,0,8">
-                        <Border DockPanel.Dock="Right" Style="{StaticResource Badge}" Background="{StaticResource AccentSoft}" Margin="6,0,0,0"
-                                Visibility="{Binding ArchivedVisibility}">
-                          <TextBlock Text="{Binding Archived}" Foreground="{StaticResource Accent}" FontSize="11.5" FontWeight="SemiBold" />
-                        </Border>
-                        <CheckBox IsChecked="{Binding Include}">
-                          <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{StaticResource Accent}" />
-                        </CheckBox>
-                      </DockPanel>
+                      <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{StaticResource Accent}" TextWrapping="Wrap" Margin="0,0,0,6" />
+                      <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="보낼 곳" Style="{StaticResource Hint}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <RadioButton Content="시험지" Style="{StaticResource Seg}" Tag="{StaticResource ExamColor}" GroupName="{Binding Key}" IsChecked="{Binding IsExam}" />
+                        <RadioButton Content="예상문제" Style="{StaticResource Seg}" Tag="{StaticResource PracticeColor}" GroupName="{Binding Key}" IsChecked="{Binding IsPractice}" />
+                        <RadioButton Content="버림" Style="{StaticResource Seg}" Tag="{StaticResource NoneColor}" GroupName="{Binding Key}" IsChecked="{Binding IsNone}" Margin="0" />
+                      </StackPanel>
                       <TextBlock Text="{Binding Top}" TextWrapping="Wrap" LineHeight="21" />
                       <Image Source="{Binding Image}" MaxWidth="320" MaxHeight="240" HorizontalAlignment="Left" Margin="0,8" />
                       <TextBlock Text="{Binding Bottom}" TextWrapping="Wrap" LineHeight="21" />
@@ -243,6 +293,16 @@
                       </Border>
                     </StackPanel>
                   </Border>
+                  <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding Destination}" Value="시험지">
+                      <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource ExamColor}" />
+                      <Setter TargetName="card" Property="BorderThickness" Value="2" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Destination}" Value="예상문제">
+                      <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource PracticeColor}" />
+                      <Setter TargetName="card" Property="BorderThickness" Value="2" />
+                    </DataTrigger>
+                  </DataTemplate.Triggers>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
@@ -250,17 +310,17 @@
         </DockPanel>
       </Border>
 
-      <!-- ④ 시험지 -->
+      <!-- ④ 시험지 / 예상문제 (탭 두 개) -->
       <Border Grid.Column="6" Style="{StaticResource Card}">
         <DockPanel>
-          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
             <Border Style="{StaticResource StepBadge}">
               <TextBlock Text="4" Foreground="White" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
-            <TextBlock Text="시험지" Style="{StaticResource StepTitle}" />
+            <RadioButton x:Name="ExamTab" Style="{StaticResource Pill}" GroupName="tab" IsChecked="True" Checked="Tab_Checked" Content="시험지" />
+            <RadioButton x:Name="PracticeTab" Style="{StaticResource Pill}" GroupName="tab" Checked="Tab_Checked" Content="예상문제" />
           </StackPanel>
-          <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,10"
-                     Text="③에서 체크한 문항이 자동으로 들어옵니다. 문항함에서 더 넣고 ↑↓로 순서를 정하세요." />
+          <TextBlock x:Name="TabHint" DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,10" />
           <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
             <Button DockPanel.Dock="Right" Content="비우기" Click="ClearExam_Click" Margin="6,0,0,0" />
             <Button Content="문항함에서 넣기…" Click="AddFromBank_Click" Margin="0" />
@@ -277,7 +337,7 @@
                   <Grid.RowDefinitions>
                     <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
                   </Grid.RowDefinitions>
-                  <TextBlock Text="시험 이름" Style="{StaticResource Label}" Margin="0,0,8,8" />
+                  <TextBlock x:Name="TitleLabel" Text="시험 이름" Style="{StaticResource Label}" Margin="0,0,8,8" />
                   <TextBox x:Name="TitleBox" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,8" TextChanged="Settings_Changed" />
                   <TextBlock Grid.Row="1" Text="과목" Style="{StaticResource Label}" Margin="0,0,8,8" />
                   <TextBox x:Name="SubjectBox" Grid.Row="1" Grid.Column="1" Margin="0,0,10,8" Text="과학" TextChanged="Settings_Changed" />
@@ -299,7 +359,7 @@
             </Border>
             <Button x:Name="RenderButton" Content="시험지 만들기" Style="{StaticResource Primary}" Click="Render_Click" Margin="0,12,0,0" />
             <Button Content="만든 시험지 폴더" Click="ExamsFolder_Click" Margin="0,8,0,0" FontSize="12.5" Padding="8,5"
-                    ToolTip="이 작업에서 만든 시험지(날짜별)를 엽니다." />
+                    ToolTip="이 작업에서 만든 시험지·예상문제지(날짜별)를 엽니다." />
           </StackPanel>
 
           <Border BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10">
@@ -331,7 +391,7 @@
                       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button Content="↑" Style="{StaticResource SmallButton}" Click="EntryUp_Click" Tag="{Binding}" ToolTip="앞으로" />
                         <Button Content="↓" Style="{StaticResource SmallButton}" Click="EntryDown_Click" Tag="{Binding}" ToolTip="뒤로" />
-                        <Button Content="✕" Style="{StaticResource SmallButton}" Click="EntryRemove_Click" Tag="{Binding}" ToolTip="시험지에서 빼기" />
+                        <Button Content="✕" Style="{StaticResource SmallButton}" Click="EntryRemove_Click" Tag="{Binding}" ToolTip="빼기(이번 작업 문항은 ③에서 '버림'이 됩니다)" />
                       </StackPanel>
                       <StackPanel>
                         <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />

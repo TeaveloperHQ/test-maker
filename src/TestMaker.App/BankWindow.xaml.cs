@@ -65,10 +65,13 @@ public partial class BankWindow : Window
     /// <summary>[고른 문항을 시험지에 넣기]로 닫았을 때, 고른 순서대로.</summary>
     public List<BankItem> Picked { get; } = [];
 
-    public BankWindow(QuestionBank bank)
+    /// <param name="target">고른 문항이 들어갈 ④의 탭("시험지"/"예상문제"). 그 칸을 먼저 보여 준다.</param>
+    public BankWindow(QuestionBank bank, string target = Destination.Exam)
     {
         this.bank = bank;
         InitializeComponent();
+        PickButton.Content = $"고른 문항을 ④ {target}에 넣기";
+        (target == Destination.Practice ? PracticeTab : ExamTab).IsChecked = true;
         Reload();
     }
 

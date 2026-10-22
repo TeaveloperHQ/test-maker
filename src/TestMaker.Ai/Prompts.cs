@@ -7,7 +7,8 @@ public static class Prompts
 {
     public const string FoundFile = "found.json";
 
-    public static string FindQuestions(AuthoringJob job)
+    /// <param name="sources">문항을 찾을 자료(아직 찾지 않은 것만).</param>
+    public static string FindQuestions(IEnumerable<SourceFile> sources)
     {
         var sb = new StringBuilder();
         sb.AppendLine("""
@@ -16,7 +17,7 @@ public static class Prompts
 
             자료 파일:
             """);
-        foreach (var s in job.Sources)
+        foreach (var s in sources)
             foreach (var f in s.ReadFiles) sb.AppendLine($"- {Slash(f)}   (원래 파일: {s.Name})");
         sb.AppendLine($$"""
 

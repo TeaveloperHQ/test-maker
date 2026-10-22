@@ -261,6 +261,36 @@
       </Setter>
     </Style>
 
+    <!-- ③ 행선지 고르기(시험지 / 예상문제 / 버림): 고르면 Tag의 색으로 칠한다 -->
+    <Style x:Key="Seg" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="{StaticResource Text2}" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Margin" Value="0,0,4,0" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border x:Name="b" Background="{StaticResource SoftBg}" CornerRadius="12" Padding="10,3">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="b" Property="Background" Value="{StaticResource LineStrong}" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="b" Property="Background" Value="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" />
+                <Setter Property="Foreground" Value="White" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <SolidColorBrush x:Key="ExamColor" Color="#4F46E5" />
+    <SolidColorBrush x:Key="PracticeColor" Color="#0891B2" />
+    <SolidColorBrush x:Key="NoneColor" Color="#8089A6" />
+
     <!-- 칸 표시(시험용·예상문제) -->
     <Style x:Key="Badge" TargetType="Border">
       <Setter Property="CornerRadius" Value="6" />
