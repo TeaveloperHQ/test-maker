@@ -22,9 +22,10 @@ public abstract class Observable : INotifyPropertyChanged
 }
 
 /// <summary>
-/// 자료 → 문항 찾기 → 변형 → 시험지 한 번의 작업. 작업 폴더(job.json이 있는 곳)에 모든 것이 남는다.
+/// 작업 = 시험 하나의 프로필(예: "2026 2학기 1차고사"). 작업 폴더(job.json이 있는 곳)에 모든 것이 남아
+/// 언제든 다시 열면 그대로 이어서 할 수 있다.
 ///   sources/  선생님이 준 자료의 사본(+ 한글 파일은 PDF와 그 안의 그림)
-///   items/    문항별 결과(q01.json …)   figures/  그린 그림
+///   items/    문항별 결과(q01.json …)   figures/  그린 그림   시험지/  만든 시험지(날짜별)
 /// </summary>
 public sealed class AuthoringJob
 {
@@ -32,6 +33,11 @@ public sealed class AuthoringJob
     public const string SourcesDir = "sources";
     public const string ItemsDir = "items";
     public const string FiguresDir = "figures";
+    public const string ExamsDir = "시험지";
+
+    /// <summary>작업 이름(예: "2026 2학기 1차고사"). 비어 있으면 폴더 이름.</summary>
+    public string Name { get; set; } = "";
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public List<SourceFile> Sources { get; set; } = [];
     public List<FoundQuestion> Questions { get; set; } = [];
@@ -42,7 +48,24 @@ public sealed class AuthoringJob
     public string? FormDir { get; set; }
     /// <summary>문항함에 보관한 결과: "q01/0" → 칸 이름("시험용"/"예상문제"). 같은 문항을 두 번 보관하지 않게.</summary>
     public Dictionary<string, string> Archived { get; set; } = [];
+    /// <summary>③에서 체크를 끈 결과("q01/0"). 끈 것은 ④ 시험지에도 들어가지 않는다.</summary>
+    public List<string> Excluded { get; set; } = [];
+    /// <summary>④ 시험지에 넣은 문항과 그 순서.</summary>
+    public List<ExamListEntry> ExamList { get; set; } = [];
+    public bool Pdf { get; set; } = true;
+    public bool Answers { get; set; } = true;
 }
+
+/// <summary>④ 시험지 목록의 한 줄(저장용). 이번 작업의 결과("job:q01/0")이거나 문항함의 문항("bank:id").</summary>
+public sealed class ExamListEntry
+{
+    public string Key { get; set; } = "";
+    /// <summary>문항함 문항이면 그 폴더.</summary>
+    public string? BankDir { get; set; }
+}
+
+/// <summary>작업 목록에 보일 요약.</summary>
+public sealed record JobSummary(string Dir, string Name, DateTime Modified, int Sources, int Questions, int ExamQuestions);
 
 public sealed class SourceFile
 {

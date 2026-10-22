@@ -18,14 +18,18 @@
       <DockPanel>
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
           <Button Content="문항함" Click="OpenBank_Click" FontWeight="SemiBold" Foreground="{StaticResource Accent}" BorderBrush="{StaticResource Accent}" Margin="0,0,16,0" />
-          <Button Content="새 작업" Click="NewJob_Click" />
-          <Button Content="작업 열기…" Click="OpenJob_Click" />
+          <Button Content="작업 목록…" Click="OpenJob_Click" />
+          <Button Content="새 작업…" Click="NewJob_Click" />
           <Button Content="작업 폴더" Click="OpenFolder_Click" Margin="0" />
         </StackPanel>
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
           <Image Source="/icon-128.png" Width="38" Height="38" RenderOptions.BitmapScalingMode="HighQuality" />
           <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-            <TextBlock Text="Test Maker" FontSize="20" FontWeight="Bold" Foreground="{StaticResource GradText}" />
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Test Maker" FontSize="20" FontWeight="Bold" Foreground="{StaticResource GradText}" />
+              <TextBlock Text="│" FontSize="18" Foreground="{StaticResource LineStrong}" Margin="12,0" VerticalAlignment="Center" />
+              <TextBlock x:Name="JobNameText" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </StackPanel>
             <TextBlock x:Name="JobText" Style="{StaticResource Hint}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" MaxWidth="760" />
           </StackPanel>
         </StackPanel>
@@ -115,7 +119,7 @@
                     <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
                   </Grid.RowDefinitions>
                   <TextBlock Text="추가 요청" Style="{StaticResource Label}" Margin="0,0,10,0" />
-                  <TextBox Grid.Column="1" x:Name="RequestBox" ToolTip="모든 문항에 적용됩니다. 예: 그래프 문항으로 바꿔 줘 / 난이도를 조금 높여 줘" />
+                  <TextBox Grid.Column="1" x:Name="RequestBox" TextChanged="Settings_Changed" ToolTip="모든 문항에 적용됩니다. 예: 그래프 문항으로 바꿔 줘 / 난이도를 조금 높여 줘" />
                 </Grid>
               </StackPanel>
             </Border>
@@ -274,26 +278,28 @@
                     <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
                   </Grid.RowDefinitions>
                   <TextBlock Text="시험 이름" Style="{StaticResource Label}" Margin="0,0,8,8" />
-                  <TextBox x:Name="TitleBox" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,8" />
+                  <TextBox x:Name="TitleBox" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,8" TextChanged="Settings_Changed" />
                   <TextBlock Grid.Row="1" Text="과목" Style="{StaticResource Label}" Margin="0,0,8,8" />
-                  <TextBox x:Name="SubjectBox" Grid.Row="1" Grid.Column="1" Margin="0,0,10,8" Text="과학" />
+                  <TextBox x:Name="SubjectBox" Grid.Row="1" Grid.Column="1" Margin="0,0,10,8" Text="과학" TextChanged="Settings_Changed" />
                   <TextBlock Grid.Row="1" Grid.Column="2" Text="학년" Style="{StaticResource Label}" Margin="0,0,8,8" />
-                  <TextBox x:Name="GradeBox" Grid.Row="1" Grid.Column="3" Margin="0,0,0,8" />
+                  <TextBox x:Name="GradeBox" Grid.Row="1" Grid.Column="3" Margin="0,0,0,8" TextChanged="Settings_Changed" />
                   <TextBlock Grid.Row="2" Text="일시" Style="{StaticResource Label}" Margin="0,0,8,8" />
-                  <TextBox x:Name="DateBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,8" />
+                  <TextBox x:Name="DateBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,8" TextChanged="Settings_Changed" />
                   <TextBlock Grid.Row="3" Text="양식" Style="{StaticResource Label}" />
                   <DockPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3">
                     <Button DockPanel.Dock="Right" Content="학습…" Click="LearnForm_Click" Margin="6,0,0,0" Padding="8,6" ToolTip="학교 시험지 양식(한글 파일)을 배워 목록에 넣습니다." />
-                    <ComboBox x:Name="FormBox" DisplayMemberPath="Name" />
+                    <ComboBox x:Name="FormBox" DisplayMemberPath="Name" SelectionChanged="Settings_Changed" />
                   </DockPanel>
                 </Grid>
                 <WrapPanel Margin="0,10,0,0">
-                  <CheckBox x:Name="PdfCheck" Content="PDF도" IsChecked="True" Margin="0,0,14,0" />
-                  <CheckBox x:Name="AnswersCheck" Content="정답·해설지도" IsChecked="True" />
+                  <CheckBox x:Name="PdfCheck" Content="PDF도" IsChecked="True" Margin="0,0,14,0" Click="Settings_Changed" />
+                  <CheckBox x:Name="AnswersCheck" Content="정답·해설지도" IsChecked="True" Click="Settings_Changed" />
                 </WrapPanel>
               </StackPanel>
             </Border>
             <Button x:Name="RenderButton" Content="시험지 만들기" Style="{StaticResource Primary}" Click="Render_Click" Margin="0,12,0,0" />
+            <Button Content="만든 시험지 폴더" Click="ExamsFolder_Click" Margin="0,8,0,0" FontSize="12.5" Padding="8,5"
+                    ToolTip="이 작업에서 만든 시험지(날짜별)를 엽니다." />
           </StackPanel>
 
           <Border BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10">

@@ -93,6 +93,20 @@ public sealed class QuestionBank(string root)
         return items.OrderByDescending(i => i.SavedAt).ToList();
     }
 
+    /// <summary>문항 폴더 하나를 읽는다. 지워졌거나 읽지 못하면 null.</summary>
+    public static BankItem? LoadItem(string dir)
+    {
+        var file = Path.Combine(dir, BankItem.FileName);
+        if (!File.Exists(file)) return null;
+        try
+        {
+            var item = JsonStore.Load<BankItem>(file);
+            item.Dir = dir;
+            return item;
+        }
+        catch (Exception e) when (e is JsonException or InvalidDataException or IOException) { return null; }
+    }
+
     /// <summary>시험용 ↔ 예상문제로 옮긴다.</summary>
     public void Move(BankItem item, BankCategory to)
     {

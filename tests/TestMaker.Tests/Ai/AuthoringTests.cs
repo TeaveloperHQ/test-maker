@@ -39,6 +39,43 @@ public sealed class AuthoringTests : IDisposable
     }
 
     [Fact]
+    public void Named_jobs_are_listed_and_reopen_with_everything()
+    {
+        var root = Path.Combine(dir, "작업");
+        var a = Authoring.Create(null, root, "2026 2학기 1차고사");
+        var b = Authoring.Create(null, root, "2026 2학기 1차고사");          // 같은 이름 → 폴더에 번호
+        Assert.EndsWith("2026 2학기 1차고사", a.Dir);
+        Assert.EndsWith("2026 2학기 1차고사 (2)", b.Dir);
+
+        a.Job.Info.Title = "2026학년도 2학기 1차 지필평가";
+        a.Job.Excluded.Add("q01/1");
+        a.Job.ExamList.Add(new ExamListEntry { Key = "bank:abc", BankDir = @"C:\문항함\시험용\abc" });
+        a.Job.ExamList.Add(new ExamListEntry { Key = "job:q01/0" });
+        a.Save();
+        File.SetLastWriteTime(Path.Combine(b.Dir, AuthoringJob.FileName), DateTime.Now.AddDays(-1));
+
+        var list = Authoring.List(root);
+        Assert.Equal(["2026 2학기 1차고사", "2026 2학기 1차고사"], list.Select(s => s.Name));
+        Assert.Equal(a.Dir, list[0].Dir);                                     // 최근에 고친 것이 앞
+        Assert.Equal(2, list[0].ExamQuestions);
+
+        var back = Authoring.Open(null, a.Dir);
+        Assert.Equal("2026 2학기 1차고사", back.Name);
+        Assert.Equal("2026학년도 2학기 1차 지필평가", back.Job.Info.Title);
+        Assert.Equal(["q01/1"], back.Job.Excluded);
+        Assert.Equal(["bank:abc", "job:q01/0"], back.Job.ExamList.Select(e => e.Key));
+    }
+
+    [Fact]
+    public void Without_claude_only_finding_and_making_fail()
+    {
+        var a = Authoring.Create(null, Path.Combine(dir, "작업"), "클로드 없음");
+        a.AddSource(MakeFile("문항.png"));                                   // 자료 넣기는 된다
+        var e = Assert.Throws<AggregateException>(() => a.FindQuestionsAsync().Wait());
+        Assert.Contains("Claude Code", e.InnerException!.Message);
+    }
+
+    [Fact]
     public void Check_reports_count_answer_and_missing_figure()
     {
         var q = new FoundQuestion { Id = "q01", Number = "7", Variants = 2 };

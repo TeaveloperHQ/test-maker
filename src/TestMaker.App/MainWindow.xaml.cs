@@ -61,6 +61,8 @@ public sealed class ExamEntry(string key, string title, string sub, Question que
     /// <summary>그림 경로를 절대 경로로 바꾼 사본.</summary>
     public Question Question { get; } = question;
     public bool FromJob { get; } = fromJob;
+    /// <summary>문항함 문항이면 그 폴더(작업에 저장해 두었다가 다시 열 때 읽는다).</summary>
+    public string? BankDir { get; init; }
 
     int number;
     public int Number { get => number; set => Set(ref number, value); }
@@ -73,7 +75,6 @@ public partial class MainWindow : Window
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "TestMaker");
     static readonly string JobsDir = Path.Combine(Home, "작업");
     static readonly string FormsDir = Path.Combine(Home, "양식");
-    static readonly string ExamsDir = Path.Combine(Home, "시험지");
     static readonly string BankDir = Path.Combine(Home, "문항함");
 
     readonly ObservableCollection<SourceFile> sources = [];
@@ -86,6 +87,15 @@ public partial class MainWindow : Window
     Authoring? job;
     CancellationTokenSource? cts;
     bool refreshing;
+    /// <summary>작업을 화면에 펼치는 중(이때 생기는 변경은 저장하지 않는다).</summary>
+    bool loading;
+
+    /// <summary>프로그램 설정(마지막에 연 작업).</summary>
+    sealed class AppSettings
+    {
+        public string? LastJob { get; set; }
+    }
+    static readonly string SettingsFile = Path.Combine(Home, "settings.json");
 
     public MainWindow()
     {
@@ -95,17 +105,23 @@ public partial class MainWindow : Window
         ResultList.ItemsSource = results;
         ExamList.ItemsSource = examEntries;
         sources.CollectionChanged += (_, _) => DropHint.Visibility = sources.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        examEntries.CollectionChanged += (_, _) => Renumber();
+        examEntries.CollectionChanged += (_, _) => { Renumber(); SaveExamList(); };
         LoadForms();
         Renumber();
 
         if (ClaudeCode.Find() is { } exe) claude = new ClaudeCode(exe);
-        else Status("Claude Code를 찾지 못했습니다. 설치하고 로그인한 뒤 다시 실행하세요(문항 찾기·변형에 필요).");
-        // TestMaker.exe <작업 폴더> 로 실행하면 그 작업을 연다.
+        // TestMaker.exe <작업 폴더> 로 실행하면 그 작업을, 아니면 마지막에 연 작업을 연다.
         var args = Environment.GetCommandLineArgs();
-        if (claude is not null && args.Length > 1 && File.Exists(Path.Combine(args[1], AuthoringJob.FileName)))
-            job = Authoring.Open(claude, args[1], HwpSource.Convert);
+        var start = args.Length > 1 ? args[1] : LoadSettings().LastJob;
+        if (start is not null && File.Exists(Path.Combine(start, AuthoringJob.FileName)))
+        {
+            try { job = Authoring.Open(claude, start, HwpSource.Convert); }
+            catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException) { job = null; }
+        }
         ShowJob();
+        if (claude is null) Status("Claude Code를 찾지 못했습니다. 문항 찾기·변형을 하려면 설치하고 로그인하세요(시험지 만들기는 됩니다).");
+        else if (job is null) Status("[새 작업…]으로 시험 하나(예: 2026 2학기 1차고사)를 만들거나, [작업 목록…]에서 여세요.");
+        else Status($"'{job.Name}' 작업을 열었습니다.");
 
         // (개발용) TESTMAKER_SNAPSHOT=파일.png: 화면을 그 파일로 저장하고 끝낸다(화면 캡처 없이 확인).
         if (Environment.GetEnvironmentVariable("TESTMAKER_SNAPSHOT") is { Length: > 0 } snap)
@@ -124,6 +140,15 @@ public partial class MainWindow : Window
                     Snapshot(w, bankSnap);
                     w.Close();
                 }
+                // TESTMAKER_SNAPSHOT_JOBS=파일.png 이면 작업 목록 창도 찍는다.
+                if (Environment.GetEnvironmentVariable("TESTMAKER_SNAPSHOT_JOBS") is { Length: > 0 } jobsSnap)
+                {
+                    var w = new JobListWindow(JobsDir, job?.Dir) { Owner = this };
+                    w.Show();
+                    await Task.Delay(1500);
+                    Snapshot(w, jobsSnap);
+                    w.Close();
+                }
                 Close();
             };
     }
@@ -140,55 +165,162 @@ public partial class MainWindow : Window
 
     // ── 작업 ──────────────────────────────────────────────
 
-    Authoring EnsureJob()
+    /// <summary>지금 작업. 없으면 새 작업을 만들지 묻는다(취소하면 null).</summary>
+    Authoring? EnsureJob()
     {
-        if (job is not null) return job;
-        if (claude is null) throw new InvalidOperationException("Claude Code가 없어 작업을 만들 수 없습니다.");
-        job = Authoring.Open(claude, Path.Combine(JobsDir, DateTime.Now.ToString("yyyy-MM-dd HHmmss")), HwpSource.Convert);
-        ShowJob();
+        if (job is null) NewJob();
         return job;
     }
 
-    void ShowJob()
+    /// <summary>새 작업: 이름을 받아 만들고 연다.</summary>
+    bool NewJob()
     {
-        sources.Clear(); questions.Clear(); results.Clear(); excluded.Clear();
-        JobText.Text = job is null ? "새 작업" : $"작업 폴더: {job.Dir}";
-        if (job is null) { SyncJobEntries(); return; }
-        foreach (var s in job.Job.Sources) sources.Add(s);
-        foreach (var q in job.Job.Questions)
-        {
-            q.Status = File.Exists(Path.Combine(job.Dir, q.ItemFile)) ? "완료" : "";
-            questions.Add(q);
-        }
-        RequestBox.Text = job.Job.Request;
-        var info = job.Job.Info;
-        TitleBox.Text = info.Title; SubjectBox.Text = info.Subject.Length > 0 ? info.Subject : "과학";
-        GradeBox.Text = info.Grade; DateBox.Text = info.Date;
-        if (job.Job.FormDir is { } fd) FormBox.SelectedItem = FormBox.Items.Cast<FormChoice>().FirstOrDefault(f => f.Dir == fd) ?? FormBox.SelectedItem;
-        RefreshResults();
+        var w = new NewJobWindow { Owner = this };
+        if (w.ShowDialog() != true) return false;
+        var j = Authoring.Create(claude, JobsDir, w.JobName, HwpSource.Convert);
+        j.Job.Info.Title = w.JobName;
+        j.Job.Info.Grade = w.Grade;
+        j.Job.Info.Subject = w.Subject.Length > 0 ? w.Subject : "과학";
+        j.Save();
+        SwitchTo(j);
+        Status($"'{j.Name}' 작업을 만들었습니다. 자료를 넣으세요.");
+        return true;
     }
 
-    void NewJob_Click(object sender, RoutedEventArgs e)
+    void SwitchTo(Authoring j)
     {
-        job = null;
+        job = j;
+        SaveSettings(new AppSettings { LastJob = j.Dir });
         ShowJob();
-        Status("새 작업을 시작합니다. 자료를 넣으세요.");
     }
+
+    /// <summary>작업의 모든 것을 화면에 펼친다: 자료, 문항 표, 결과(체크), ④ 시험지 목록과 순서, 시험 정보·양식.</summary>
+    void ShowJob()
+    {
+        loading = true;
+        try
+        {
+            sources.Clear(); questions.Clear(); results.Clear(); excluded.Clear(); examEntries.Clear();
+            JobNameText.Text = job?.Name ?? "작업 없음";
+            JobText.Text = job is null ? "[새 작업…]으로 시작하세요." : $"작업 폴더: {job.Dir}";
+            if (job is null) return;
+            foreach (var s in job.Job.Sources) sources.Add(s);
+            foreach (var q in job.Job.Questions)
+            {
+                q.Status = File.Exists(Path.Combine(job.Dir, q.ItemFile)) ? "완료" : "";
+                q.PropertyChanged -= Question_Changed;
+                q.PropertyChanged += Question_Changed;
+                questions.Add(q);
+            }
+            foreach (var key in job.Job.Excluded)
+                if (key.Split('/') is [var id, var idx] && int.TryParse(idx, out var i)) excluded.Add((id, i));
+            RequestBox.Text = job.Job.Request;
+            var info = job.Job.Info;
+            TitleBox.Text = info.Title; SubjectBox.Text = info.Subject.Length > 0 ? info.Subject : "과학";
+            GradeBox.Text = info.Grade; DateBox.Text = info.Date;
+            FormBox.SelectedItem = FormBox.Items.Cast<FormChoice>().FirstOrDefault(f => f.Dir == (job.Job.FormDir ?? FormRendering.DefaultFormDir))
+                                   ?? FormBox.Items[0];
+            PdfCheck.IsChecked = job.Job.Pdf;
+            AnswersCheck.IsChecked = job.Job.Answers;
+            RefreshResults();
+            RestoreExamList();
+        }
+        finally { loading = false; }
+        Renumber();
+    }
+
+    /// <summary>저장해 둔 ④ 목록대로 문항함 문항을 다시 넣고 순서를 맞춘다(이번 작업 결과는 ③의 체크로 이미 들어와 있다).</summary>
+    void RestoreExamList()
+    {
+        var missing = 0;
+        foreach (var saved in job!.Job.ExamList.Where(s => s.Key.StartsWith("bank:")))
+        {
+            if (examEntries.Any(e => e.Key == saved.Key)) continue;
+            if (saved.BankDir is not null && QuestionBank.LoadItem(saved.BankDir) is { } item)
+                examEntries.Add(BankEntryOf(item));
+            else missing++;
+        }
+        var order = job.Job.ExamList.Select(s => s.Key).ToList();
+        var sorted = examEntries.OrderBy(e => order.IndexOf(e.Key) is var i && i >= 0 ? i : int.MaxValue).ToList();
+        for (int i = 0; i < sorted.Count; i++)
+        {
+            var from = examEntries.IndexOf(sorted[i]);
+            if (from != i) examEntries.Move(from, i);
+        }
+        if (missing > 0) Status($"④ 시험지에 넣어 두었던 문항함 문항 {missing}개를 찾지 못했습니다(문항함에서 지워졌을 수 있음).");
+    }
+
+    static ExamEntry BankEntryOf(BankItem item) =>
+        new("bank:" + item.Id, item.Title, $"문항함 · {item.CategoryText}", QuestionBank.Absolutize(item.Question, item.Dir), fromJob: false)
+        { BankDir = item.Dir };
+
+    void SaveExamList()
+    {
+        if (loading || job is null) return;
+        job.Job.ExamList = examEntries.Select(e => new ExamListEntry { Key = e.Key, BankDir = e.BankDir }).ToList();
+        job.Save();
+    }
+
+    /// <summary>시험 정보·양식·추가 요청·PDF/정답지 선택을 바뀔 때마다 작업에 저장한다.</summary>
+    void Settings_Changed(object sender, RoutedEventArgs e)
+    {
+        if (loading || job is null || !IsInitialized) return;
+        var j = job.Job;
+        j.Info.Title = TitleBox.Text.Trim();
+        j.Info.Subject = SubjectBox.Text.Trim();
+        j.Info.Grade = GradeBox.Text.Trim();
+        j.Info.Date = DateBox.Text.Trim();
+        j.Request = RequestBox.Text;
+        var form = FormBox.SelectedItem as FormChoice;
+        j.FormDir = form is null || form.Dir == FormRendering.DefaultFormDir ? null : form.Dir;
+        j.Pdf = PdfCheck.IsChecked == true;
+        j.Answers = AnswersCheck.IsChecked == true;
+        job.Save();
+    }
+
+    void Question_Changed(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (loading || job is null || e.PropertyName == nameof(FoundQuestion.Status)) return;
+        job.Save();
+        if (e.PropertyName == nameof(FoundQuestion.Include)) RefreshResults();
+    }
+
+    static AppSettings LoadSettings()
+    {
+        try { return File.Exists(SettingsFile) ? JsonStore.Load<AppSettings>(SettingsFile) : new(); }
+        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException) { return new(); }
+    }
+
+    static void SaveSettings(AppSettings s)
+    {
+        try { JsonStore.Save(SettingsFile, s); } catch (IOException) { }
+    }
+
+    void NewJob_Click(object sender, RoutedEventArgs e) => NewJob();
 
     void OpenJob_Click(object sender, RoutedEventArgs e)
     {
-        if (claude is null) return;
-        Directory.CreateDirectory(JobsDir);
-        var d = new OpenFolderDialog { Title = "작업 폴더 고르기", InitialDirectory = JobsDir };
-        if (d.ShowDialog(this) != true) return;
-        if (!File.Exists(Path.Combine(d.FolderName, AuthoringJob.FileName)))
+        var w = new JobListWindow(JobsDir, job?.Dir) { Owner = this };
+        if (w.ShowDialog() != true) return;
+        if (w.WantsNew) { NewJob(); return; }
+        if (w.Chosen is null) return;
+        try
         {
-            MessageBox.Show(this, "작업 폴더가 아닙니다(job.json 없음).", "작업 열기");
-            return;
+            SwitchTo(Authoring.Open(claude, w.Chosen, HwpSource.Convert));
+            Status($"'{job!.Name}' 작업을 열었습니다.");
         }
-        job = Authoring.Open(claude, d.FolderName, HwpSource.Convert);
-        ShowJob();
-        Status("작업을 열었습니다.");
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or InvalidDataException)
+        {
+            MessageBox.Show(this, $"작업을 열지 못했습니다: {ex.Message}", "작업 열기");
+        }
+    }
+
+    void ExamsFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (job is null) return;
+        var dir = Path.Combine(job.Dir, AuthoringJob.ExamsDir);
+        Directory.CreateDirectory(dir);
+        Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true });
     }
 
     void OpenFolder_Click(object sender, RoutedEventArgs e)
@@ -235,14 +367,14 @@ public partial class MainWindow : Window
         enc.Frames.Add(BitmapFrame.Create(bitmap));
         using var ms = new MemoryStream();
         enc.Save(ms);
-        var j = EnsureJob();
+        if (EnsureJob() is not { } j) return;
         sources.Add(j.AddImage(ms.ToArray(), $"캡처 {DateTime.Now:HHmmss}"));
         Status("붙여 넣은 그림을 자료에 넣었습니다.");
     }
 
     async Task AddFiles(string[] files)
     {
-        var j = EnsureJob();
+        if (EnsureJob() is not { } j) return;
         var bad = files.Where(f => !Authoring.IsSupported(f)).ToList();
         await Run("자료를 넣는 중…", async _ =>
         {
@@ -291,7 +423,13 @@ public partial class MainWindow : Window
         {
             var found = await job.FindQuestionsAsync(Status, ct);
             questions.Clear();
-            foreach (var q in found) questions.Add(q);
+            foreach (var q in found)
+            {
+                q.PropertyChanged += Question_Changed;
+                questions.Add(q);
+            }
+            job.Job.Excluded.Clear();
+            excluded.Clear();
             job.Save();
             RefreshResults();
             Status(found.Count == 0 ? "문항을 찾지 못했습니다. 자료를 확인하세요." : $"문항 {found.Count}개를 찾았습니다. 문항마다 변형 수를 정하고 [변형 만들기]를 누르세요.");
@@ -439,7 +577,13 @@ public partial class MainWindow : Window
     void OnResultChanged(ResultItem r)
     {
         if (r.Include) excluded.Remove((r.Id, r.Index)); else excluded.Add((r.Id, r.Index));
-        if (!refreshing) SyncJobEntries();
+        if (refreshing) return;
+        SyncJobEntries();
+        if (!loading && job is not null)
+        {
+            job.Job.Excluded = excluded.Select(x => $"{x.Id}/{x.Index}").ToList();
+            job.Save();
+        }
     }
 
     void ArchiveExam_Click(object sender, RoutedEventArgs e) => Archive(BankCategory.Exam);
@@ -506,7 +650,7 @@ public partial class MainWindow : Window
         {
             var key = "bank:" + item.Id;
             if (examEntries.Any(x => x.Key == key)) continue;
-            examEntries.Add(new ExamEntry(key, item.Title, $"문항함 · {item.CategoryText}", QuestionBank.Absolutize(item.Question, item.Dir), fromJob: false));
+            examEntries.Add(BankEntryOf(item));
             added++;
         }
         Status($"문항함에서 {added}문항을 ④ 시험지에 넣었습니다.");
@@ -540,17 +684,20 @@ public partial class MainWindow : Window
     async void Render_Click(object sender, RoutedEventArgs e)
     {
         if (examEntries.Count == 0) { Status("④에 넣은 문항이 없습니다. ③에서 체크하거나 [문항함에서 넣기]를 하세요."); return; }
+        // 시험지는 작업 안에 남긴다(문항함 문항만으로 만들 때도 작업 하나는 있어야 한다).
+        if (job is null)
+        {
+            var keep = examEntries.ToList();
+            if (EnsureJob() is null) return;
+            foreach (var x in keep.Where(x => !x.FromJob && examEntries.All(e => e.Key != x.Key))) examEntries.Add(x);
+        }
+        var j = job!;
+        Settings_Changed(this, e);
         var info = new ExamInfo
         {
             Title = TitleBox.Text.Trim(), Subject = SubjectBox.Text.Trim(), Grade = GradeBox.Text.Trim(), Date = DateBox.Text.Trim(),
         };
         var form = FormBox.SelectedItem as FormChoice;
-        if (job is not null)
-        {
-            job.Job.Info = info;
-            job.Job.FormDir = form?.Dir == FormRendering.DefaultFormDir ? null : form?.Dir;
-            job.Save();
-        }
 
         var exam = new Exam { Info = info, Questions = examEntries.Select(x => x.Question).ToList() };
         var errors = ExamValidator.Validate(exam, expectedTotal: null).Where(i => i.Severity == Severity.Error).ToList();
@@ -560,7 +707,7 @@ public partial class MainWindow : Window
             return;
         }
         var name = string.Concat((info.Title.Length > 0 ? info.Title : "시험지").Split(Path.GetInvalidFileNameChars()));
-        var dir = Path.Combine(ExamsDir, $"{DateTime.Now:yyyy-MM-dd HHmm} {name}");
+        var dir = Path.Combine(j.Dir, AuthoringJob.ExamsDir, $"{DateTime.Now:yyyy-MM-dd HHmm}");
         Directory.CreateDirectory(dir);
         JsonStore.Save(Path.Combine(dir, "시험.json"), exam);
         var output = Path.Combine(dir, name + ".hwp");

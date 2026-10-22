@@ -17,13 +17,16 @@ public sealed class Authoring
     public static readonly string[] HwpExtensions = [".hwp", ".hwpx"];
     const int MaxFixes = 2;
 
-    readonly ClaudeCode claude;
+    readonly ClaudeCode? claude;
     readonly HwpConverter? convertHwp;
 
     public string Dir { get; }
     public AuthoringJob Job { get; }
 
-    Authoring(ClaudeCode claude, string dir, AuthoringJob job, HwpConverter? convertHwp)
+    /// <summary>작업 이름(이름이 없던 예전 작업은 폴더 이름).</summary>
+    public string Name => Job.Name.Length > 0 ? Job.Name : Path.GetFileName(Dir);
+
+    Authoring(ClaudeCode? claude, string dir, AuthoringJob job, HwpConverter? convertHwp)
     {
         this.claude = claude;
         this.convertHwp = convertHwp;
@@ -31,8 +34,8 @@ public sealed class Authoring
         Job = job;
     }
 
-    /// <summary>새 작업(폴더가 없으면 만든다) 또는 기존 작업 열기.</summary>
-    public static Authoring Open(ClaudeCode claude, string dir, HwpConverter? convertHwp = null)
+    /// <param name="claude">없으면(Claude Code 미설치) 문항 찾기·변형만 못 하고 나머지(자료, 시험지)는 된다.</param>
+    public static Authoring Open(ClaudeCode? claude, string dir, HwpConverter? convertHwp = null)
     {
         Directory.CreateDirectory(dir);
         var file = Path.Combine(dir, AuthoringJob.FileName);
@@ -40,7 +43,45 @@ public sealed class Authoring
         return new Authoring(claude, dir, job, convertHwp);
     }
 
+    /// <summary>이름 붙인 새 작업. 폴더 이름 = 작업 이름(같은 이름이 있으면 번호를 붙인다).</summary>
+    public static Authoring Create(ClaudeCode? claude, string jobsRoot, string name, HwpConverter? convertHwp = null)
+    {
+        name = name.Trim();
+        if (name.Length == 0) throw new ArgumentException("작업 이름을 적으세요.");
+        var safe = string.Concat(name.Split(Path.GetInvalidFileNameChars())).Trim().TrimEnd('.');
+        if (safe.Length == 0) safe = "작업";
+        var dir = Path.Combine(jobsRoot, safe);
+        for (int i = 2; Directory.Exists(dir); i++) dir = Path.Combine(jobsRoot, $"{safe} ({i})");
+        var a = Open(claude, dir, convertHwp);
+        a.Job.Name = name;
+        a.Job.CreatedAt = DateTime.Now;
+        a.Save();
+        return a;
+    }
+
+    /// <summary>작업 목록(최근에 고친 것이 앞). 읽지 못하는 폴더는 건너뛴다.</summary>
+    public static List<JobSummary> List(string jobsRoot)
+    {
+        var list = new List<JobSummary>();
+        if (!Directory.Exists(jobsRoot)) return list;
+        foreach (var d in Directory.EnumerateDirectories(jobsRoot))
+        {
+            var file = Path.Combine(d, AuthoringJob.FileName);
+            if (!File.Exists(file)) continue;
+            try
+            {
+                var j = JsonStore.Load<AuthoringJob>(file);
+                list.Add(new JobSummary(d, j.Name.Length > 0 ? j.Name : Path.GetFileName(d), File.GetLastWriteTime(file),
+                                        j.Sources.Count, j.Questions.Count, j.ExamList.Count));
+            }
+            catch (Exception e) when (e is System.Text.Json.JsonException or InvalidDataException or IOException) { }
+        }
+        return list.OrderByDescending(s => s.Modified).ToList();
+    }
+
     public void Save() => JsonStore.Save(Path.Combine(Dir, AuthoringJob.FileName), Job);
+
+    ClaudeCode Claude => claude ?? throw new InvalidOperationException("Claude Code가 없어 문항 찾기·변형을 할 수 없습니다. 설치하고 로그인하세요.");
 
     public static bool IsSupported(string path)
     {
@@ -98,7 +139,7 @@ public sealed class Authoring
         var found = Path.Combine(Dir, Prompts.FoundFile);
         File.Delete(found);
         log?.Invoke("자료를 읽고 문항을 찾는 중…");
-        var r = await claude.RunAsync(Dir, Prompts.FindQuestions(Job), progress: log, ct: ct);
+        var r = await Claude.RunAsync(Dir, Prompts.FindQuestions(Job), progress: log, ct: ct);
         if (r.IsError) throw new InvalidOperationException($"문항을 찾지 못했습니다: {r.Text}");
         if (!File.Exists(found)) throw new InvalidOperationException($"문항 목록 파일이 만들어지지 않았습니다. Claude 답: {r.Text}");
 
@@ -142,7 +183,7 @@ public sealed class Authoring
         var item = Path.Combine(Dir, q.ItemFile);
         File.Delete(item);
 
-        var r = await claude.RunAsync(Dir, Prompts.MakeVariants(Job, q), progress: log, ct: ct);
+        var r = await Claude.RunAsync(Dir, Prompts.MakeVariants(Job, q), progress: log, ct: ct);
         for (int attempt = 0; ; attempt++)
         {
             if (r.IsError) throw new InvalidOperationException($"{q.Number}번: 만들지 못했습니다 — {r.Text}");
@@ -151,7 +192,7 @@ public sealed class Authoring
             if (attempt >= MaxFixes || r.SessionId is null)
                 throw new InvalidOperationException($"{q.Number}번: 결과에 문제가 남았습니다 — {string.Join(" / ", problems)}");
             log?.Invoke($"고치는 중: {string.Join(" / ", problems)}");
-            r = await claude.RunAsync(Dir, Prompts.Fix(q, problems), resume: r.SessionId, progress: log, ct: ct);
+            r = await Claude.RunAsync(Dir, Prompts.Fix(q, problems), resume: r.SessionId, progress: log, ct: ct);
         }
     }
 
