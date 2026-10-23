@@ -3,7 +3,8 @@
   <!-- 선생님용 윈도우 프로그램: 자료 → 문항 찾기 → 변형 → 시험지 -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- Windows 10 SDK 판: 자료 PDF 쪽을 그림으로 보이는 데 Windows.Data.Pdf를 쓴다(원문 보기) -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <AssemblyName>TestMaker</AssemblyName>
     <RootNamespace>TestMaker.App</RootNamespace>

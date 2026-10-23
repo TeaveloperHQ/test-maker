@@ -34,6 +34,7 @@ public sealed class AuthoringJob
     public const string ItemsDir = "items";
     public const string FiguresDir = "figures";
     public const string ExamsDir = "시험지";
+    public const string OriginalsDir = "originals";
 
     /// <summary>작업 이름(예: "2026 2학기 1차고사"). 비어 있으면 폴더 이름.</summary>
     public string Name { get; set; } = "";
@@ -75,6 +76,9 @@ public sealed class ExamListEntry
     public string? BankDir { get; set; }
 }
 
+/// <summary>③에 보일 결과 하나: 열쇠(행선지·문항함에 쓰는 이름), "원문항"/"변형 n", 문항.</summary>
+public sealed record JobResult(string Key, string Label, Question Item);
+
 /// <summary>작업 목록에 보일 요약.</summary>
 public sealed record JobSummary(string Dir, string Name, DateTime Modified, int Sources, int Questions, int ExamQuestions, int PracticeQuestions = 0);
 
@@ -88,6 +92,8 @@ public sealed class SourceFile
     public List<string> ReadFiles { get; set; } = [];
     /// <summary>한글 파일 안에 들어 있던 그림(작업 폴더 기준). 그림을 그대로 따라 그릴 때 원본으로 쓴다.</summary>
     public List<string> Figures { get; set; } = [];
+    /// <summary>PDF 자료의 쪽 그림(작업 폴더 기준). Claude가 여기서 문항 영역(원문 캡처)과 그림을 잘라 낸다.</summary>
+    public List<string> Pages { get; set; } = [];
     /// <summary>이 자료에서 문항을 찾았는지. [문항 찾기]는 아직 안 찾은 자료만 읽는다.</summary>
     public bool Analyzed { get; set; }
 }
@@ -125,8 +131,8 @@ public sealed class FoundQuestion : Observable
     /// <summary>이 문항의 변형 방식(<see cref="VariantStyle"/>).</summary>
     public string Style { get => style; set => Set(ref style, value); }
 
-    bool keepOriginal;
-    /// <summary>원래 문항도 그대로 옮겨 넣을지.</summary>
+    bool keepOriginal = true;
+    /// <summary>원래 문항도 결과에 넣을지(기본 켬 — 필요 없으면 ③에서 버림).</summary>
     public bool KeepOriginal { get => keepOriginal; set => Set(ref keepOriginal, value); }
 
     string status = "";
@@ -141,4 +147,8 @@ public sealed class FoundQuestion : Observable
 
     public int ExpectedCount => Variants + (KeepOriginal ? 1 : 0);
     public string ItemFile => Path.Combine(AuthoringJob.ItemsDir, Id + ".json");
+    /// <summary>[문항 찾기] 때 옮긴 원문항.</summary>
+    public string OriginalFile => Path.Combine(AuthoringJob.OriginalsDir, Id + ".json");
+    /// <summary>자료에서 이 문항 영역만 잘라 낸 그림(원문 그대로 보기).</summary>
+    public string SnapshotFile => Path.Combine(AuthoringJob.OriginalsDir, Id + ".png");
 }

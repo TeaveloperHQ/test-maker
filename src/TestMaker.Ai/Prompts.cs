@@ -8,35 +8,111 @@ public static class Prompts
     public const string FoundFile = "found.json";
 
     /// <param name="sources">문항을 찾을 자료(아직 찾지 않은 것만).</param>
-    public static string FindQuestions(IEnumerable<SourceFile> sources)
+    /// <param name="firstId">이번에 찾는 첫 문항의 번호(그림 파일 이름에 쓴다: q{firstId}, q{firstId+1} …).</param>
+    public static string FindQuestions(IEnumerable<SourceFile> sources, int firstId = 1)
     {
         var sb = new StringBuilder();
         sb.AppendLine("""
             너는 한국 중·고등학교 과학 선생님의 시험 출제를 돕는다. 지금 폴더는 작업 폴더다.
-            아래 자료 파일을 모두 읽고(그림이면 그림을 보고, PDF면 모든 쪽을), 그 안에 있는 시험 문항을 빠짐없이 찾아라.
+            아래 자료 파일을 모두 읽고(그림이면 그림을 보고, PDF면 모든 쪽을), 그 안에 있는 시험 문항을 빠짐없이 찾아
+            목록을 만들고, 문항마다 원문을 그대로 옮겨 둔다(원문항).
 
             자료 파일:
             """);
-        foreach (var s in sources)
+        var list = sources.ToList();
+        foreach (var s in list)
             foreach (var f in s.ReadFiles) sb.AppendLine($"- {Slash(f)}   (원래 파일: {s.Name})");
+        foreach (var s in list) AppendPagesAndFigures(sb, s);
+        var ids = $"이번에 찾는 문항에 차례로 q{firstId:00}, q{firstId + 1:00}, … 를 붙인다";
+        var findRules = OriginalRules(
+            "`" + AuthoringJob.FiguresDir + "/q{번호}_원본.png` — " + ids + ".",
+            "`" + AuthoringJob.OriginalsDir + "/q{번호}.png` — " + ids + ".");
         sb.AppendLine($$"""
 
             찾은 문항을 `{{FoundFile}}`에 UTF-8 JSON으로 저장하라. 형식:
             {"questions": [
               {"source": "원래 파일 이름", "number": "07", "summary": "온도가 다른 두 물체를 접촉할 때 열의 이동(보기 고르기)",
-               "type": "MultipleChoice", "hasFigure": true}
+               "type": "MultipleChoice", "hasFigure": true,
+               "original": { …원문항 하나(아래 문항 형식의 questions 안 항목 하나와 같다)… } }
             ]}
             - 자료에 나온 순서대로. number는 자료에 적힌 번호 그대로(없으면 순서대로 "1", "2" …).
             - type: 선택형 MultipleChoice, 단답형 ShortAnswer, 서술형·논술형 Essay.
             - summary: 선생님이 어떤 문항인지 알아볼 수 있게 한 줄(30자 안팎). 잘려서 일부만 보이면 끝에 "(일부 잘림)".
             - 문항이 아닌 것(표지, 유의사항, 정답표, 해설, 단원 정리)은 넣지 마라. 묶음 문항([3~4] 공통 지문)은 문항마다 따로.
             - 문항을 하나도 못 찾으면 {"questions": []}.
-            파일 저장 말고는 아무것도 바꾸지 마라. 끝나면 찾은 문항 수만 한 줄로 답하라.
+
+            {{findRules}}
+
+            파일 저장과 그림 말고는 아무것도 바꾸지 마라. 끝나면 찾은 문항 수만 한 줄로 답하라.
             """);
         return sb.ToString();
     }
 
-    public static string MakeVariants(AuthoringJob job, FoundQuestion q)
+    public const string OriginalsFile = "originals_new.json";
+
+    /// <summary>이미 찾은 문항의 원문만 나중에 옮길 때(문항 목록은 그대로).</summary>
+    public static string TranscribeOriginals(SourceFile source, IEnumerable<FoundQuestion> questions)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("""
+            너는 한국 중·고등학교 과학 선생님의 시험 출제를 돕는다. 지금 폴더는 작업 폴더다.
+            아래 자료에서 다음 문항들을 찾아, 문항마다 원문을 그대로 옮겨라(원문항).
+
+            자료 파일:
+            """);
+        foreach (var f in source.ReadFiles) sb.AppendLine($"- {Slash(f)}");
+        AppendPagesAndFigures(sb, source);
+        sb.AppendLine("\n옮길 문항(id: 자료의 번호 · 요약):");
+        foreach (var q in questions) sb.AppendLine($"- {q.Id}: {q.Number}번 · {q.Summary}");
+        var rules = OriginalRules(
+            "`" + AuthoringJob.FiguresDir + "/{id}_원본.png` (예: q01_원본.png).",
+            "`" + AuthoringJob.OriginalsDir + "/{id}.png` (예: originals/q01.png).");
+        sb.AppendLine($$"""
+
+            `{{OriginalsFile}}`에 UTF-8 JSON으로 저장하라. 형식:
+            {"originals": [ {"id": "q01", "original": { …원문항 하나(아래 문항 형식의 questions 안 항목 하나와 같다)… } } ]}
+
+            {{rules}}
+
+            파일 저장과 그림 말고는 아무것도 바꾸지 마라. 끝나면 옮긴 문항 수만 한 줄로 답하라.
+            """);
+        return sb.ToString();
+    }
+
+    static void AppendPagesAndFigures(StringBuilder sb, SourceFile s)
+    {
+        if (s.Pages.Count > 0)
+        {
+            sb.AppendLine($"'{s.Name}'의 쪽 그림(PDF 쪽을 그림으로 저장한 것 — 문항 영역과 그림은 여기서 잘라 낸다):");
+            foreach (var p in s.Pages) sb.AppendLine($"- {Slash(p)}");
+        }
+        if (s.Figures.Count > 0)
+        {
+            sb.AppendLine($"'{s.Name}' 안에 들어 있던 그림 파일(원본 그대로라 화질이 좋다 — 맞는 것이 있으면 이것을 쓴다):");
+            foreach (var f in s.Figures) sb.AppendLine($"- {Slash(f)}");
+        }
+    }
+
+    /// <summary>원문항을 옮기는 규칙(그대로 옮김, 정답은 풀어서, 그림은 원본 그대로, 문항 영역 캡처).</summary>
+    static string OriginalRules(string figureName, string snapshotName) => $$"""
+        ## 원문 그림(문항 캡처) — 선생님이 원문을 볼 때 쓴다
+        - 문항마다 그 문항 영역만(문항 번호부터 마지막 선택지·답란까지, 그 문항의 그림·<보기>·자료 포함) 쪽 그림(또는 그림·캡처 자료)에서
+          잘라 {{snapshotName}} 로 저장한다. 다른 문항이 섞이지 않게 위아래 경계를 정확히, 여백은 조금만. 2단 편집이면 그 문항이 있는 단만.
+          묶음 문항의 공통 지문은 함께 넣는다. 잘라 낸 그림을 직접 열어 보고, 잘리거나 넘친 곳이 있으면 다시 자른다.
+
+        ## 원문항(original) 옮기기
+        - 발문·자료·<보기>·선택지를 **자료에 적힌 그대로** 옮긴다(고치거나 다듬지 마라). 문항 번호와 ①② 기호, ㄱ. ㄴ. 머리는 빼고 적는다.
+        - 정답과 해설: 자료에 정답이 있으면 그것을, 없으면 직접 풀어서 넣는다. 배점이 적혀 있으면 그대로, 없으면 선택형 4점·서술형 5점.
+        - 그림: 원본 그림을 **그대로** 쓴다(다시 그리지 않는다). 위 그림 파일 중 맞는 것을 복사하거나, 없으면 쪽 그림·캡처 자료에서
+          그 그림 부분만 잘라 낸다. 파일 이름은 {{figureName}} 그림을 얻을 수 없으면 "image"를 빼라.
+        - 잘라 내기: PowerShell + System.Drawing. 스크립트 .ps1은 UTF-8 BOM으로 저장해
+          `powershell -NoProfile -ExecutionPolicy Bypass -File 스크립트.ps1`로 실행한다(여러 문항을 한 스크립트로 잘라도 된다).
+        - 문항 형식:
+        {{Format}}
+        """;
+
+    /// <param name="hasOriginal">원문항을 [문항 찾기] 때 이미 옮겨 두었는지. 그렇다면 변형만 만든다.</param>
+    public static string MakeVariants(AuthoringJob job, FoundQuestion q, bool hasOriginal = false)
     {
         var source = job.Sources.FirstOrDefault(s => s.Name == q.Source);
         var sb = new StringBuilder();
@@ -50,14 +126,12 @@ public static class Prompts
         {
             sb.AppendLine("자료 파일:");
             foreach (var f in source.ReadFiles) sb.AppendLine($"- {Slash(f)}");
-            if (source.Figures.Count > 0)
-            {
-                sb.AppendLine("이 자료 안에 들어 있던 그림 파일(원본 그림을 그대로 쓰거나 따라 그릴 때 이것을 보라):");
-                foreach (var f in source.Figures) sb.AppendLine($"- {Slash(f)}");
-            }
+            AppendPagesAndFigures(sb, source);
         }
         sb.AppendLine();
-        if (q.KeepOriginal) sb.AppendLine("- 첫 문항: 원래 문항을 그대로 옮긴 것(글, 그림, 선택지, 정답 모두 원래대로).");
+        if (hasOriginal)
+            sb.AppendLine($"원래 문항은 `{Slash(q.OriginalFile)}`에 이미 옮겨 두었다(그림 포함). 이것을 기준으로 삼고, 결과 파일에는 **변형 문항만** 넣는다.");
+        else if (q.KeepOriginal) sb.AppendLine("- 첫 문항: 원래 문항을 그대로 옮긴 것(글, 그림, 선택지, 정답 모두 원래대로).");
         if (q.Variants > 0)
         {
             sb.AppendLine($"- 변형 문항 {q.Variants}개. 변형 방식: {q.Style}{StyleHint(q.Style)}");
@@ -89,7 +163,7 @@ public static class Prompts
               (여러 변형이 같은 그림을 쓰면 같은 파일을 가리켜도 된다.) 그림 표시 폭 widthMm은 원본 문항에서의 비율을 보고 정한다(한 단 폭 약 100mm).
 
             ## 결과 파일
-            `{{Slash(q.ItemFile)}}` 에 UTF-8 JSON으로 저장하라. 문항 {{q.ExpectedCount}}개를 순서대로:
+            `{{Slash(q.ItemFile)}}` 에 UTF-8 JSON으로 저장하라. 문항 {{(hasOriginal ? q.Variants : q.ExpectedCount)}}개를 순서대로:
             {{Format}}
 
             저장한 뒤 JSON이 올바른지(문법, 정답 번호 범위, 그림 파일이 실제로 있는지) 다시 확인하라.

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using TestMaker.Ai;
 using TestMaker.Core.Forms;
 using TestMaker.Core.Models;
@@ -49,6 +49,7 @@ try
         ["learn", var src, var dir, .. var rest] => Learn(src, dir, rest),
         ["build-default-form", var dir] => BuildDefaultForm(dir),
         ["author", var dir, .. var rest] when rest.Length > 0 => await Author(dir, rest),
+        ["originals", var dir, .. var names] => await Originals(dir, names),
         _ => Help(),
     };
 }
@@ -121,6 +122,7 @@ static async Task<int> Author(string dir, string[] rest)
     var opts = Options.Parse(rest[files.Count..], valued: ["-n", "--style", "--request", "-t"], flags: ["--keep"]);
     var exe = ClaudeCode.Find() ?? throw new InvalidOperationException("Claude Code(claude.exe)를 찾지 못했습니다. 설치하고 로그인하세요.");
     var a = Authoring.Open(new ClaudeCode(exe), dir, HwpSource.Convert);
+    a.RenderPages = PdfPages.Save;
     void Log(string m) => Console.WriteLine($"  … {m}");
 
     foreach (var f in files) Console.WriteLine($"자료: {a.AddSource(f).Name}");
@@ -147,6 +149,17 @@ static async Task<int> Author(string dir, string[] rest)
     var output = Path.Combine(a.Dir, "시험지.hwp");
     var rendered = FormRendering.Render(exam, a.Job.FormDir ?? FormRendering.DefaultFormDir, a.Dir, output, original: true, pdf: true);
     foreach (var r in rendered) Console.WriteLine($"{r.Path} ({r.Pages}쪽)");
+    return 0;
+}
+
+/// <summary>작업의 예전 문항(원문을 옮기지 않은 것)에 원문을 옮긴다. 자료 이름을 주면 그 자료만.</summary>
+static async Task<int> Originals(string dir, string[] names)
+{
+    var exe = ClaudeCode.Find() ?? throw new InvalidOperationException("Claude Code(claude.exe)를 찾지 못했습니다.");
+    var a = Authoring.Open(new ClaudeCode(exe), dir, HwpSource.Convert);
+    a.RenderPages = PdfPages.Save;
+    foreach (var s in a.Job.Sources.Where(s => names.Length == 0 || names.Contains(s.Name)))
+        Console.WriteLine($"{s.Name}: 원문 {await a.TranscribeOriginalsAsync(s, m => Console.WriteLine($"  … {m}"))}개");
     return 0;
 }
 

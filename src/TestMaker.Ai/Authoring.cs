@@ -8,6 +8,9 @@ namespace TestMaker.Ai;
 /// <summary>한글 파일을 Claude가 읽을 수 있게 바꾸는 함수: (한글 파일 사본, 결과 폴더) → (PDF, 안에 든 그림들).</summary>
 public delegate (string Pdf, IReadOnlyList<string> Figures) HwpConverter(string hwpPath, string outDir);
 
+/// <summary>PDF 쪽을 그림으로 저장하는 함수: (PDF, 결과 폴더) → 쪽 그림들.</summary>
+public delegate IReadOnlyList<string> PageRenderer(string pdfPath, string outDir);
+
 /// <summary>
 /// 작업 하나를 진행한다: 자료 넣기 → 문항 찾기 → 문항별 변형 → 시험(Exam) 만들기.
 /// Claude가 쓴 결과는 앱이 검사하고, 틀린 곳은 같은 대화로 고쳐 달라고 한다.
@@ -26,6 +29,28 @@ public sealed class Authoring
 
     /// <summary>작업 이름(이름이 없던 예전 작업은 폴더 이름).</summary>
     public string Name => Job.Name.Length > 0 ? Job.Name : Path.GetFileName(Dir);
+
+    /// <summary>PDF 자료의 쪽을 그림으로 저장하는 함수(있으면 원문 캡처·그림 자르기에 쓴다).</summary>
+    public PageRenderer? RenderPages { get; set; }
+
+    /// <summary>PDF 자료(한글에서 바꾼 것 포함)의 쪽 그림을 만들어 둔다(이미 있으면 그대로). 예전 자료도 처음 필요할 때 만든다.</summary>
+    public void EnsurePages(SourceFile src)
+    {
+        if (src.Pages.Count > 0 && src.Pages.All(p => File.Exists(Path.Combine(Dir, p)))) return;
+        if (RenderPages is null || src.ReadFiles.FirstOrDefault(f => f.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) is not { } pdf) return;
+        var full = Path.Combine(Dir, pdf);
+        if (!File.Exists(full)) return;
+        var outDir = Path.Combine(Path.GetDirectoryName(full)!, Path.GetFileNameWithoutExtension(full) + "_쪽");
+        try
+        {
+            src.Pages = RenderPages(full, outDir).Select(Relative).ToList();
+            Save();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException) { }
+    }
+
+    /// <summary>문항 영역만 잘라 낸 원문 그림(없으면 null).</summary>
+    public string? SnapshotOf(FoundQuestion q) => File.Exists(Path.Combine(Dir, q.SnapshotFile)) ? Path.Combine(Dir, q.SnapshotFile) : null;
 
     Authoring(ClaudeCode? claude, string dir, AuthoringJob job, HwpConverter? convertHwp)
     {
@@ -192,6 +217,7 @@ public sealed class Authoring
         else src.ReadFiles.Add(Relative(copy));
         Job.Sources.Add(src);
         Save();
+        EnsurePages(src);
         return src;
     }
 
@@ -219,6 +245,9 @@ public sealed class Authoring
         {
             ForgetResults(q, bank, jobsRoot);
             File.Delete(Path.Combine(Dir, q.ItemFile));
+            File.Delete(Path.Combine(Dir, q.OriginalFile));
+            File.Delete(Path.Combine(Dir, ViewOriginalFile(q)));
+            File.Delete(Path.Combine(Dir, q.SnapshotFile));
             Job.Questions.Remove(q);
         }
     }
@@ -240,13 +269,16 @@ public sealed class Authoring
 
         var found = Path.Combine(Dir, Prompts.FoundFile);
         File.Delete(found);
-        log?.Invoke($"자료 {targets.Count}개를 읽고 문항을 찾는 중…");
-        var r = await claudeCode.RunAsync(Dir, Prompts.FindQuestions(targets), progress: log, ct: ct);
+        Directory.CreateDirectory(Path.Combine(Dir, AuthoringJob.FiguresDir));
+        int next = Job.Questions.Select(q => int.TryParse(q.Id.TrimStart('q'), out var n) ? n : 0).DefaultIfEmpty(0).Max() + 1;
+        log?.Invoke($"자료 {targets.Count}개를 읽고 문항을 찾는 중(원문항도 옮김)…");
+        Directory.CreateDirectory(Path.Combine(Dir, AuthoringJob.OriginalsDir));
+        foreach (var s in targets) EnsurePages(s);
+        var r = await claudeCode.RunAsync(Dir, Prompts.FindQuestions(targets, next), progress: log, ct: ct);
         if (r.IsError) throw new InvalidOperationException($"문항을 찾지 못했습니다: {r.Text}");
         if (!File.Exists(found)) throw new InvalidOperationException($"문항 목록 파일이 만들어지지 않았습니다. Claude 답: {r.Text}");
 
         var list = JsonStore.Load<FoundList>(found);
-        int next = Job.Questions.Select(q => int.TryParse(q.Id.TrimStart('q'), out var n) ? n : 0).DefaultIfEmpty(0).Max() + 1;
         var added = list.Questions.Select((e, i) => new FoundQuestion
         {
             Id = $"q{next + i:00}",
@@ -256,6 +288,15 @@ public sealed class Authoring
             Type = e.Type,
             HasFigure = e.HasFigure,
         }).ToList();
+        // 옮긴 원문항: 검사를 통과한 것만 남긴다(못 옮긴 문항은 [변형 만들기] 때 예전처럼 같이 옮긴다).
+        int saved = 0;
+        for (int i = 0; i < added.Count; i++)
+            if (list.Questions[i].Original is { } original && OriginalProblems(original).Count == 0)
+            {
+                JsonStore.Save(Path.Combine(Dir, added[i].OriginalFile), new Exam { Questions = [original] });
+                saved++;
+            }
+        if (saved < added.Count) log?.Invoke($"원문항 {added.Count - saved}개는 옮기지 못했습니다([변형 만들기] 때 함께 옮깁니다).");
         // 자료 순서대로 끼워 넣는다(목록이 자료별로 모여 보이게).
         foreach (var q in added) Job.Questions.Add(q);
         var order = Job.Sources.Select(s => s.Name).ToList();
@@ -278,7 +319,93 @@ public sealed class Authoring
         public string Summary { get; set; } = "";
         public QuestionType Type { get; set; }
         public bool HasFigure { get; set; }
+        /// <summary>[문항 찾기] 때 옮긴 원문항(앱의 문항 형식).</summary>
+        public Question? Original { get; set; }
     }
+
+    /// <summary>옮긴 원문항 검사(형식 오류, 그림 파일).</summary>
+    List<string> OriginalProblems(Question q)
+    {
+        var problems = ExamValidator.Validate(new Exam { Questions = [q] }, expectedTotal: null)
+            .Where(i => i.Severity == Severity.Error).Select(i => i.Message).ToList();
+        if (q.Image is { Path.Length: > 0 } img && !File.Exists(Path.Combine(Dir, img.Path))) problems.Add($"그림 파일이 없습니다({img.Path}).");
+        return problems;
+    }
+
+    // ── 원문항 ────────────────────────────────────────────
+
+    /// <summary>[문항 찾기] 때 원문항을 옮겨 두었는지. 옮겨 두었으면 결과 파일(items)에는 변형만 들어 있다.</summary>
+    public bool HasOriginal(FoundQuestion q) => File.Exists(Path.Combine(Dir, q.OriginalFile));
+
+    public Question? LoadOriginal(FoundQuestion q)
+    {
+        var path = Path.Combine(Dir, q.OriginalFile);
+        try { return File.Exists(path) ? JsonStore.Load<Exam>(path).Questions.FirstOrDefault() : null; }
+        catch (Exception e) when (e is System.Text.Json.JsonException or InvalidDataException) { return null; }
+    }
+
+    /// <summary>
+    /// 원문 보기용 원문항. 이미 변형을 만든 문항에 나중에 옮긴 원문은 보기 전용 파일(<c>qNN.view.json</c>)에 둔다 —
+    /// 결과의 열쇠·행선지가 바뀌지 않게.
+    /// </summary>
+    public Question? LoadOriginalForView(FoundQuestion q)
+    {
+        if (LoadOriginal(q) is { } o) return o;
+        var path = Path.Combine(Dir, ViewOriginalFile(q));
+        try { return File.Exists(path) ? JsonStore.Load<Exam>(path).Questions.FirstOrDefault() : null; }
+        catch (Exception e) when (e is System.Text.Json.JsonException or InvalidDataException) { return null; }
+    }
+
+    static string ViewOriginalFile(FoundQuestion q) => Path.Combine(AuthoringJob.OriginalsDir, q.Id + ".view.json");
+
+    /// <summary>
+    /// 이미 찾은 문항(원문을 옮기지 않은 예전 문항)의 원문을 옮긴다. 문항 목록과 결과는 그대로 둔다.
+    /// 아직 변형을 만들지 않은 문항은 보통 원문항이 되고(원문항 칸이 바로 쓰임), 이미 만든 문항은 보기 전용으로 둔다.
+    /// </summary>
+    /// <returns>옮긴 문항 수.</returns>
+    public async Task<int> TranscribeOriginalsAsync(SourceFile src, Action<string>? log = null, CancellationToken ct = default)
+    {
+        // 원문(글)이나 원문 그림(문항 영역 캡처) 중 하나라도 없는 문항.
+        var todo = Job.Questions.Where(q => q.Source == src.Name && (LoadOriginalForView(q) is null || SnapshotOf(q) is null)).ToList();
+        if (todo.Count == 0) return 0;
+        var claudeCode = Claude;
+        Directory.CreateDirectory(Path.Combine(Dir, AuthoringJob.FiguresDir));
+        Directory.CreateDirectory(Path.Combine(Dir, AuthoringJob.OriginalsDir));
+        EnsurePages(src);
+        var outFile = Path.Combine(Dir, Prompts.OriginalsFile);
+        File.Delete(outFile);
+        log?.Invoke($"'{src.Name}'에서 문항 {todo.Count}개의 원문을 옮기는 중…");
+        var r = await claudeCode.RunAsync(Dir, Prompts.TranscribeOriginals(src, todo), progress: log, ct: ct);
+        if (r.IsError) throw new InvalidOperationException($"원문을 옮기지 못했습니다: {r.Text}");
+        if (!File.Exists(outFile)) throw new InvalidOperationException($"원문 파일이 만들어지지 않았습니다. Claude 답: {r.Text}");
+
+        var list = JsonStore.Load<OriginalList>(outFile);
+        foreach (var e in list.Originals)
+        {
+            var q = todo.FirstOrDefault(x => x.Id == e.Id);
+            // 이미 옮긴 원문(글)은 그대로 둔다(결과 열쇠가 바뀌지 않게) — 원문 그림만 새로 생겼을 수 있다.
+            if (q is null || LoadOriginalForView(q) is not null || e.Original is not { } original || OriginalProblems(original).Count > 0) continue;
+            var target = File.Exists(Path.Combine(Dir, q.ItemFile)) ? ViewOriginalFile(q) : q.OriginalFile;
+            JsonStore.Save(Path.Combine(Dir, target), new Exam { Questions = [original] });
+        }
+        var done = todo.Count(q => LoadOriginalForView(q) is not null || SnapshotOf(q) is not null);
+        log?.Invoke($"원문 {done}개를 옮겼습니다.");
+        return done;
+    }
+
+    sealed class OriginalList
+    {
+        public List<OriginalEntry> Originals { get; set; } = [];
+    }
+
+    sealed class OriginalEntry
+    {
+        public string Id { get; set; } = "";
+        public Question? Original { get; set; }
+    }
+
+    /// <summary>Claude가 결과 파일에 써야 할 문항 수(원문항을 옮겨 두었으면 변형만).</summary>
+    public int ClaudeCount(FoundQuestion q) => HasOriginal(q) ? q.Variants : q.ExpectedCount;
 
     // ── 변형 만들기 ────────────────────────────────────────
 
@@ -290,13 +417,19 @@ public sealed class Authoring
         Directory.CreateDirectory(Path.Combine(Dir, AuthoringJob.FiguresDir));
         var item = Path.Combine(Dir, q.ItemFile);
         File.Delete(item);
+        if (ClaudeCount(q) == 0)
+        {
+            // 원문항만: 이미 옮겨 두었으니 Claude 없이 끝난다.
+            JsonStore.Save(item, new Exam());
+            return Results(q).Select(x => x.Item).ToList();
+        }
 
-        var r = await Claude.RunAsync(Dir, Prompts.MakeVariants(Job, q), progress: log, ct: ct);
+        var r = await Claude.RunAsync(Dir, Prompts.MakeVariants(Job, q, HasOriginal(q)), progress: log, ct: ct);
         for (int attempt = 0; ; attempt++)
         {
             if (r.IsError) throw new InvalidOperationException($"{q.Number}번: 만들지 못했습니다 — {r.Text}");
             var problems = Check(q);
-            if (problems.Count == 0) return LoadItems(q);
+            if (problems.Count == 0) return Results(q).Select(x => x.Item).ToList();
             if (attempt >= MaxFixes || r.SessionId is null)
                 throw new InvalidOperationException($"{q.Number}번: 결과에 문제가 남았습니다 — {string.Join(" / ", problems)}");
             log?.Invoke($"고치는 중: {string.Join(" / ", problems)}");
@@ -314,8 +447,8 @@ public sealed class Authoring
         catch (Exception e) when (e is System.Text.Json.JsonException or InvalidDataException) { return [$"JSON 형식 오류: {e.Message}"]; }
 
         var problems = new List<string>();
-        if (exam.Questions.Count != q.ExpectedCount)
-            problems.Add($"문항이 {exam.Questions.Count}개입니다({q.ExpectedCount}개여야 함).");
+        if (exam.Questions.Count != ClaudeCount(q))
+            problems.Add($"문항이 {exam.Questions.Count}개입니다({ClaudeCount(q)}개여야 함).");
         problems.AddRange(ExamValidator.Validate(exam, expectedTotal: null).Select(i => i.ToString()));
         for (int i = 0; i < exam.Questions.Count; i++)
         {
@@ -326,32 +459,47 @@ public sealed class Authoring
         return problems;
     }
 
+    /// <summary>결과 파일(items)에 든 문항 그대로.</summary>
     public List<Question> LoadItems(FoundQuestion q)
     {
         var path = Path.Combine(Dir, q.ItemFile);
         return File.Exists(path) ? JsonStore.Load<Exam>(path).Questions : [];
     }
 
+    /// <summary>
+    /// ③에 보일 결과: 원문항(켜져 있으면) + 변형. 원문항을 [문항 찾기] 때 옮겨 두었으면 원문항 칸을 끄고 켜는 대로 바로 바뀐다.
+    /// 열쇠: 원문항 "q01/원", 변형 "q01/1" … (예전 방식으로 만든 문항은 결과 파일 순번 "q01/0" …).
+    /// </summary>
+    public List<JobResult> Results(FoundQuestion q)
+    {
+        var items = LoadItems(q);
+        var list = new List<JobResult>();
+        if (HasOriginal(q))
+        {
+            if (q.KeepOriginal && LoadOriginal(q) is { } original) list.Add(new JobResult($"{q.Id}/원", "원문항", original));
+            for (int i = 0; i < items.Count; i++) list.Add(new JobResult($"{q.Id}/{i + 1}", $"변형 {i + 1}", items[i]));
+        }
+        else
+        {
+            for (int i = 0; i < items.Count; i++)
+                list.Add(new JobResult($"{q.Id}/{i}", q.KeepOriginal && i == 0 ? "원문항" : $"변형 {(q.KeepOriginal ? i : i + 1)}", items[i]));
+        }
+        return list;
+    }
+
     // ── 행선지(③): 시험지 / 예상문제 / 버림 ──────────────────
 
-    public static string Key(FoundQuestion q, int index) => $"{q.Id}/{index}";
-
-    /// <summary>"원문항" 또는 "변형 n".</summary>
-    public static string ResultLabel(FoundQuestion q, int index) =>
-        q.KeepOriginal && index == 0 ? "원문항" : $"변형 {(q.KeepOriginal ? index : index + 1)}";
-
     /// <summary>문항함·④ 목록에 보일 이름. 예: "07번 변형 1 · 열평형 온도 구하기"</summary>
-    public static string ResultTitle(FoundQuestion q, int index) => $"{q.Number}번 {ResultLabel(q, index)} · {q.Summary}";
+    public static string ResultTitle(FoundQuestion q, string label) => $"{q.Number}번 {label} · {q.Summary}";
 
-    public string? DestinationOf(FoundQuestion q, int index) => Job.Destinations.GetValueOrDefault(Key(q, index));
+    public string? DestinationOf(string key) => Job.Destinations.GetValueOrDefault(key);
 
     /// <summary>
     /// 결과 하나의 행선지를 정한다(null = 버림). 시험지·예상문제로 보내면 문항함(시험용·예상문제)에도 자동으로 들어가고,
     /// 바꾸면 칸을 옮기고, 버리면 문항함에서도 뺀다(다른 작업이 그 문항을 쓰고 있으면 남긴다).
     /// </summary>
-    public void SetDestination(FoundQuestion q, int index, string? dest, QuestionBank? bank = null, string? jobsRoot = null)
+    public void SetDestination(FoundQuestion q, string key, string? dest, QuestionBank? bank = null, string? jobsRoot = null)
     {
-        var key = Key(q, index);
         if (Job.Destinations.GetValueOrDefault(key) == dest) return;
         if (dest is null)
         {
@@ -369,9 +517,9 @@ public sealed class Authoring
                     bank.Move(item, cat);
                     Job.Archived[key] = item.Dir;
                 }
-                else if (LoadItems(q) is var items && index < items.Count)
+                else if (Results(q).FirstOrDefault(x => x.Key == key) is { } result)
                 {
-                    Job.Archived[key] = bank.Add(items[index], Dir, cat, ResultTitle(q, index), source: Name).Dir;
+                    Job.Archived[key] = bank.Add(result.Item, Dir, cat, ResultTitle(q, result.Label), source: Name).Dir;
                 }
             }
         }
@@ -421,16 +569,12 @@ public sealed class Authoring
 
     // ── 시험 만들기 ────────────────────────────────────────
 
-    /// <summary>고른 문항의 결과를 자료 순서대로 모아 시험을 만든다. exclude: 결과 중 빼기로 한 것(문항 Id, 순번).</summary>
-    public Exam BuildExam(ISet<(string Id, int Index)>? exclude = null)
+    /// <summary>쓰는 문항의 결과를 자료 순서대로 모두 모아 시험을 만든다(명령 창 author용).</summary>
+    public Exam BuildExam()
     {
         var exam = new Exam { Info = Job.Info };
         foreach (var q in Job.Questions.Where(q => q.Include))
-        {
-            var items = LoadItems(q);
-            for (int i = 0; i < items.Count; i++)
-                if (exclude?.Contains((q.Id, i)) != true) exam.Questions.Add(items[i]);
-        }
+            exam.Questions.AddRange(Results(q).Select(r => r.Item));
         return exam;
     }
 

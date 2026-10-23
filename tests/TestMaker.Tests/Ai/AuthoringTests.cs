@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using TestMaker.Ai;
 using TestMaker.Core.Models;
 using TestMaker.Core.Serialization;
@@ -100,31 +100,82 @@ public sealed class AuthoringTests : IDisposable
         var bank = new TestMaker.Core.Bank.QuestionBank(Path.Combine(dir, "문항함"));
         var root = Path.Combine(dir, "작업");
         var a = Authoring.Create(null, root, "1차고사");
-        var q = new FoundQuestion { Id = "q01", Number = "7", Summary = "열평형", Variants = 2 };
+        var q = new FoundQuestion { Id = "q01", Number = "7", Summary = "열평형", Variants = 2, KeepOriginal = false };
         a.Job.Questions.Add(q);
         WriteItems(a, q, [Mc("가"), Mc("나")]);
 
-        a.SetDestination(q, 0, Destination.Exam, bank, root);
-        a.SetDestination(q, 1, Destination.Practice, bank, root);
-        Assert.Equal(Destination.Exam, a.DestinationOf(q, 0));
+        a.SetDestination(q, "q01/0", Destination.Exam, bank, root);
+        a.SetDestination(q, "q01/1", Destination.Practice, bank, root);
+        Assert.Equal(Destination.Exam, a.DestinationOf("q01/0"));
         var items = bank.Load();
         Assert.Equal(2, items.Count);
         Assert.Contains(items, i => i.Category == TestMaker.Core.Bank.BankCategory.Exam && i.Title == "7번 변형 1 · 열평형");
 
-        a.SetDestination(q, 0, Destination.Practice, bank, root);              // 바꾸면 칸을 옮긴다(새로 넣지 않음)
+        a.SetDestination(q, "q01/0", Destination.Practice, bank, root);         // 바꾸면 칸을 옮긴다(새로 넣지 않음)
         Assert.Equal(2, bank.Load().Count(i => i.Category == TestMaker.Core.Bank.BankCategory.Practice));
 
-        a.SetDestination(q, 1, null, bank, root);                               // 버리면 문항함에서도 빠진다
-        Assert.Null(a.DestinationOf(q, 1));
+        a.SetDestination(q, "q01/1", null, bank, root);                          // 버리면 문항함에서도 빠진다
+        Assert.Null(a.DestinationOf("q01/1"));
         Assert.Single(bank.Load());
 
         // 다른 작업이 쓰고 있는 문항함 문항은 버려도 남긴다.
         var other = Authoring.Create(null, root, "예상문제 모음");
         other.Job.PracticeList.Add(new ExamListEntry { Key = "bank:x", BankDir = a.Job.Archived["q01/0"] });
         other.Save();
-        a.SetDestination(q, 0, null, bank, root);
+        a.SetDestination(q, "q01/0", null, bank, root);
         Assert.Single(bank.Load());
         Assert.Empty(a.Job.Archived);
+    }
+
+    /// <summary>[문항 찾기] 때 옮겨 둔 원문항: 결과 파일에는 변형만, ③에는 원문항 칸을 켜고 끄는 대로 바로 보인다.</summary>
+    [Fact]
+    public void Original_saved_at_finding_toggles_without_remaking()
+    {
+        var q = new FoundQuestion { Id = "q01", Number = "7", Summary = "열평형", Variants = 2 };   // 원문항 기본 켬
+        Assert.True(q.KeepOriginal);
+        job.Job.Questions.Add(q);
+        JsonStore.Save(Path.Combine(job.Dir, q.OriginalFile), new Exam { Questions = [Mc("원래")] });
+        WriteItems(q, [Mc("변형가"), Mc("변형나")]);
+
+        Assert.True(job.HasOriginal(q));
+        Assert.Equal(2, job.ClaudeCount(q));                                    // Claude는 변형만 만든다
+        Assert.Empty(job.Check(q));
+        var r = job.Results(q);
+        Assert.Equal(["q01/원", "q01/1", "q01/2"], r.Select(x => x.Key));
+        Assert.Equal(["원문항", "변형 1", "변형 2"], r.Select(x => x.Label));
+        Assert.Equal("원래", r[0].Item.Stem);
+
+        job.SetDestination(q, "q01/1", Destination.Exam);
+        q.KeepOriginal = false;                                                  // 원문항을 끄면 바로 빠지고, 변형 열쇠는 그대로
+        Assert.Equal(["q01/1", "q01/2"], job.Results(q).Select(x => x.Key));
+        Assert.Equal(Destination.Exam, job.DestinationOf("q01/1"));
+    }
+
+    /// <summary>이미 변형을 만든 예전 문항에 나중에 옮긴 원문은 보기 전용 — 결과 열쇠(행선지)는 그대로.</summary>
+    [Fact]
+    public void Late_original_for_made_question_is_view_only()
+    {
+        var q = new FoundQuestion { Id = "q01", Variants = 1, KeepOriginal = false };
+        job.Job.Questions.Add(q);
+        WriteItems(q, [Mc("변형")]);
+        job.SetDestination(q, "q01/0", Destination.Exam);
+        JsonStore.Save(Path.Combine(job.Dir, "originals", "q01.view.json"), new Exam { Questions = [Mc("원래")] });
+
+        Assert.False(job.HasOriginal(q));
+        Assert.Equal("원래", job.LoadOriginalForView(q)!.Stem);
+        Assert.Equal(["q01/0"], job.Results(q).Select(r => r.Key));
+        Assert.Equal(Destination.Exam, job.DestinationOf("q01/0"));
+    }
+
+    [Fact]
+    public void Original_only_needs_no_claude()
+    {
+        var q = new FoundQuestion { Id = "q01", Variants = 0 };
+        job.Job.Questions.Add(q);
+        JsonStore.Save(Path.Combine(job.Dir, q.OriginalFile), new Exam { Questions = [Mc("원래")] });
+        var made = job.MakeVariantsAsync(q).Result;                             // Claude 없이(작업은 Claude 없이 열었다) 끝난다
+        Assert.Equal(["원래"], made.Select(x => x.Stem));
+        Assert.True(File.Exists(Path.Combine(job.Dir, q.ItemFile)));            // 완료 표시가 되도록 빈 결과 파일
     }
 
     [Fact]
@@ -159,7 +210,7 @@ public sealed class AuthoringTests : IDisposable
     [Fact]
     public void Check_reports_count_answer_and_missing_figure()
     {
-        var q = new FoundQuestion { Id = "q01", Number = "7", Variants = 2 };
+        var q = new FoundQuestion { Id = "q01", Number = "7", Variants = 2, KeepOriginal = false };
         Assert.Contains(job.Check(q), p => p.Contains("없습니다"));     // 결과 파일 없음
 
         WriteItems(q, [
@@ -177,18 +228,18 @@ public sealed class AuthoringTests : IDisposable
     }
 
     [Fact]
-    public void Exam_follows_question_order_and_skips_excluded()
+    public void Exam_follows_question_order_and_skips_unused_questions()
     {
-        var q1 = new FoundQuestion { Id = "q01", Variants = 2 };
-        var q2 = new FoundQuestion { Id = "q02", Variants = 1 };
-        var q3 = new FoundQuestion { Id = "q03", Variants = 1, Include = false };
+        var q1 = new FoundQuestion { Id = "q01", Variants = 2, KeepOriginal = false };
+        var q2 = new FoundQuestion { Id = "q02", Variants = 1, KeepOriginal = false };
+        var q3 = new FoundQuestion { Id = "q03", Variants = 1, Include = false, KeepOriginal = false };
         job.Job.Questions.AddRange([q1, q2, q3]);
         WriteItems(q1, [Mc("1-가"), Mc("1-나")]);
         WriteItems(q2, [Mc("2-가")]);
         WriteItems(q3, [Mc("3-가")]);
 
-        var exam = job.BuildExam(new HashSet<(string, int)> { ("q01", 0) });
-        Assert.Equal(["1-나", "2-가"], exam.Questions.Select(q => q.Stem));
+        var exam = job.BuildExam();
+        Assert.Equal(["1-가", "1-나", "2-가"], exam.Questions.Select(q => q.Stem));   // 쓰지 않는 문항(q03)은 빠짐
     }
 
     [Fact]

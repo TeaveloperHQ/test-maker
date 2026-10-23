@@ -25,13 +25,37 @@ public static class Choices
 
 public sealed record FormChoice(string Name, string Dir);
 
+/// <summary>② 문항 카드: 찾은 문항(정하기 칸은 Q에 묶임)과 그 원문(자료에서 잘라 낸 그림 → 없으면 옮긴 글).</summary>
+public sealed class QuestionCard(FoundQuestion q) : Observable
+{
+    public FoundQuestion Q { get; } = q;
+    public ImageSource? Snapshot { get; private set; }
+    public string Top { get; private set; } = "";
+    public ImageSource? Figure { get; private set; }
+    public string Bottom { get; private set; } = "";
+    public Visibility SnapshotVisibility => Snapshot is null ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility TextVisibility => Snapshot is null && Top.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility MissingVisibility { get; private set; } = Visibility.Collapsed;
+
+    public void Load(Authoring job, bool canTranscribe)
+    {
+        var snap = job.SnapshotOf(Q);
+        Snapshot = Preview.LoadImage(snap, decodeWidth: 1000);
+        var original = snap is null ? job.LoadOriginalForView(Q) : null;
+        Top = original is null ? "" : Preview.Plain(original.Stem);
+        Figure = original?.Image is { Path.Length: > 0 } img ? Preview.LoadImage(Path.Combine(job.Dir, img.Path), decodeWidth: 900) : null;
+        Bottom = original is null ? "" : Preview.Body(original);
+        MissingVisibility = Snapshot is null && original is null && canTranscribe ? Visibility.Visible : Visibility.Collapsed;
+        OnChanged("");
+    }
+}
+
 /// <summary>③ 결과 한 칸(만든 문항 하나)과 그 행선지(시험지 / 예상문제 / 버림=null).</summary>
-public sealed class ResultItem(FoundQuestion question, int index, Question item, string? destination, Action<ResultItem> changed) : Observable
+public sealed class ResultItem(FoundQuestion question, string key, Question item, string? destination, Action<ResultItem> changed) : Observable
 {
     public FoundQuestion Question { get; } = question;
-    public int Index { get; } = index;
-    /// <summary>작업 안에서 이 결과를 가리키는 이름(예: "q01/0"). 행선지 단추 묶음 이름으로도 쓴다.</summary>
-    public string Key => Authoring.Key(Question, Index);
+    /// <summary>작업 안에서 이 결과를 가리키는 이름(예: "q01/원", "q01/1"). 행선지 단추 묶음 이름으로도 쓴다.</summary>
+    public string Key { get; } = key;
     public string Source => Question.Source;
     public Question Item { get; } = item;
     public string Title { get; init; } = "";
@@ -86,6 +110,10 @@ public partial class MainWindow : Window
 
     readonly ObservableCollection<SourceFile> sources = [];
     readonly ObservableCollection<FoundQuestion> questions = [];
+    /// <summary>② 문항 카드(①에서 고른 자료의 문항만, 원문이 그려진 채로).</summary>
+    readonly ObservableCollection<QuestionCard> cards = [];
+    /// <summary>카드를 그린 자료.</summary>
+    string? cardsFor = "\0";
     readonly ObservableCollection<ResultItem> results = [];
     /// <summary>④ 시험지 탭 / 예상문제 탭.</summary>
     readonly ObservableCollection<ExamEntry> examEntries = [], practiceEntries = [];
@@ -95,6 +123,11 @@ public partial class MainWindow : Window
     CancellationTokenSource? cts;
     /// <summary>작업을 화면에 펼치는 중(이때 생기는 변경은 저장하지 않는다).</summary>
     bool loading;
+    /// <summary>①에서 고른 자료 이름. ②·③은 이 자료의 것만 보인다.</summary>
+    string? activeSource;
+
+    IEnumerable<FoundQuestion> VisibleQuestions => questions.Where(q => activeSource is null || q.Source == activeSource);
+    IEnumerable<ResultItem> VisibleResults => results.Where(r => activeSource is null || r.Source == activeSource);
 
     bool PracticeShown => PracticeTab.IsChecked == true;
     ObservableCollection<ExamEntry> Current => PracticeShown ? practiceEntries : examEntries;
@@ -111,11 +144,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         SourceList.ItemsSource = sources;
-        QuestionGrid.ItemsSource = questions;
+        QuestionCards.ItemsSource = cards;
         ResultList.ItemsSource = results;
-        // ②·③은 자료별로 묶어 보인다.
-        CollectionViewSource.GetDefaultView(questions).GroupDescriptions.Add(new PropertyGroupDescription(nameof(FoundQuestion.Source)));
-        CollectionViewSource.GetDefaultView(results).GroupDescriptions.Add(new PropertyGroupDescription(nameof(ResultItem.Source)));
+        // ②·③은 ①에서 고른 자료의 것만 보인다(④는 모든 자료가 쌓인다). ②는 RefreshCards가 고른 자료의 문항만 그린다.
+        CollectionViewSource.GetDefaultView(results).Filter = o => activeSource is null || ((ResultItem)o).Source == activeSource;
         sources.CollectionChanged += (_, _) => DropHint.Visibility = sources.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         examEntries.CollectionChanged += (_, _) => { Renumber(); SaveLists(); };
         practiceEntries.CollectionChanged += (_, _) => { Renumber(); SaveLists(); };
@@ -128,7 +160,7 @@ public partial class MainWindow : Window
         var start = args.Length > 1 ? args[1] : LoadSettings().LastJob;
         if (start is not null && File.Exists(Path.Combine(start, AuthoringJob.FileName)))
         {
-            try { job = Authoring.Open(claude, start, HwpSource.Convert); }
+            try { job = Authoring.Open(claude, start, HwpSource.Convert); job.RenderPages = PdfPages.Save; }
             catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException) { job = null; }
         }
         ShowJob();
@@ -141,7 +173,23 @@ public partial class MainWindow : Window
             ContentRendered += async (_, _) =>
             {
                 await Task.Delay(1500);
+                // TESTMAKER_SNAPSHOT_SOURCE=n 이면 ① n번째 자료를 골라 찍는다.
+                if (int.TryParse(Environment.GetEnvironmentVariable("TESTMAKER_SNAPSHOT_SOURCE"), out var si) && si < sources.Count)
+                {
+                    SourceList.SelectedIndex = si;
+                    await Task.Delay(1000);
+                }
                 Snapshot(this, snap);
+                // TESTMAKER_SNAPSHOT_ORIGINAL=파일.png 이면 ② 첫 문항의 원문 보기 창도 찍는다.
+                if (Environment.GetEnvironmentVariable("TESTMAKER_SNAPSHOT_ORIGINAL") is { Length: > 0 } oSnap && job is not null && cards.Count > 0)
+                {
+                    var at = int.TryParse(Environment.GetEnvironmentVariable("TESTMAKER_SNAPSHOT_ORIGINAL_ROW"), out var n) ? n : 0;
+                    var w = new OriginalWindow(job, cards[Math.Min(at, cards.Count - 1)].Q) { Owner = this };
+                    w.Show();
+                    await Task.Delay(1200);
+                    Snapshot(w, oSnap);
+                    w.Close();
+                }
                 // TESTMAKER_SNAPSHOT_PRACTICE=파일.png 이면 ④ 예상문제 탭을 연 화면도 찍는다.
                 if (Environment.GetEnvironmentVariable("TESTMAKER_SNAPSHOT_PRACTICE") is { Length: > 0 } pSnap)
                 {
@@ -209,6 +257,7 @@ public partial class MainWindow : Window
 
     void SwitchTo(Authoring j)
     {
+        j.RenderPages = PdfPages.Save;      // PDF 자료의 쪽 그림(원문 캡처·그림 자르기에 씀)
         job = j;
         SaveSettings(new AppSettings { LastJob = j.Dir });
         ShowJob();
@@ -245,8 +294,9 @@ public partial class MainWindow : Window
     /// <summary>자료 목록과 ② 문항 표를 작업에서 다시 읽는다(자료 순서대로 묶임).</summary>
     void ReloadSourcesAndQuestions()
     {
+        var keep = activeSource;
         sources.Clear(); questions.Clear();
-        if (job is null) return;
+        if (job is null) { SelectSource(null); return; }
         foreach (var s in job.Job.Sources) sources.Add(s);
         foreach (var q in job.Job.Questions)
         {
@@ -255,6 +305,42 @@ public partial class MainWindow : Window
             q.PropertyChanged += Question_Changed;
             questions.Add(q);
         }
+        SelectSource(sources.FirstOrDefault(s => s.Name == keep) ?? sources.FirstOrDefault());
+    }
+
+    /// <summary>①에서 자료를 고른다(②·③이 그 자료로 바뀐다).</summary>
+    void SelectSource(SourceFile? s)
+    {
+        if (SourceList.SelectedItem != s) SourceList.SelectedItem = s;   // → SourceList_SelectionChanged
+        else ApplySourceFilter();
+    }
+
+    void ApplySourceFilter()
+    {
+        activeSource = (SourceList.SelectedItem as SourceFile)?.Name;
+        // 카드는 자료가 바뀔 때만 다시 그린다(카드에서 고치는 중에 다시 그리면 자리가 흔들린다).
+        if (activeSource != cardsFor || cards.Count != VisibleQuestions.Count()) RefreshCards();
+        CollectionViewSource.GetDefaultView(results).Refresh();
+        var label = activeSource is null ? "자료를 고르세요" : $"📄 {activeSource}";
+        ActiveSourceText2.Text = label;
+        ActiveSourceText3.Text = label;
+
+        var src = SourceList.SelectedItem as SourceFile;
+        QuestionEmpty.Text = src is null ? (sources.Count == 0 ? "①에 자료를 넣으세요." : "①에서 자료를 고르세요.")
+            : !src.Analyzed ? "아직 문항을 찾지 않은 자료입니다.\n①의 [문항 찾기]를 누르세요."
+            : "이 자료에서 찾은 문항이 없습니다.";
+        QuestionEmpty.Visibility = VisibleQuestions.Any() ? Visibility.Collapsed : Visibility.Visible;
+        ResultEmpty.Text = VisibleQuestions.Any() ? "아직 만든 결과가 없습니다.\n②에서 [변형 만들기]를 누르세요." : "";
+        ResultEmpty.Visibility = VisibleResults.Any() ? Visibility.Collapsed : Visibility.Visible;
+        UpdateDestSummary();
+    }
+
+    void UpdateDestSummary()
+    {
+        var shown = VisibleResults.ToList();
+        var ex = shown.Count(r => r.Destination == Destination.Exam);
+        var pr = shown.Count(r => r.Destination == Destination.Practice);
+        DestSummary.Text = shown.Count == 0 ? "" : $"이 자료: 시험지 {ex} · 예상문제 {pr} · 버림 {shown.Count - ex - pr}";
     }
 
     /// <summary>저장해 둔 목록대로 문항함 문항을 다시 넣고 순서를 맞춘다(이번 작업 결과는 행선지대로 이미 들어와 있다).</summary>
@@ -312,7 +398,8 @@ public partial class MainWindow : Window
     {
         if (loading || job is null || e.PropertyName == nameof(FoundQuestion.Status)) return;
         job.Save();
-        if (e.PropertyName == nameof(FoundQuestion.Include)) RefreshResults();
+        // 쓰기·원문항을 바꾸면 ③이 바로 바뀐다(원문항을 [문항 찾기] 때 옮겨 둔 문항).
+        if (e.PropertyName is nameof(FoundQuestion.Include) or nameof(FoundQuestion.KeepOriginal)) RefreshResults();
     }
 
     static AppSettings LoadSettings()
@@ -411,7 +498,9 @@ public partial class MainWindow : Window
         using var ms = new MemoryStream();
         enc.Save(ms);
         if (EnsureJob() is not { } j) return;
-        sources.Add(j.AddImage(ms.ToArray(), $"캡처 {DateTime.Now:HHmmss}"));
+        var added = j.AddImage(ms.ToArray(), $"캡처 {DateTime.Now:HHmmss}");
+        sources.Add(added);
+        SelectSource(added);
         Status("붙여 넣은 그림을 자료에 넣었습니다. [문항 찾기]를 누르세요.");
     }
 
@@ -428,6 +517,7 @@ public partial class MainWindow : Window
                     : $"자료 넣는 중: {Path.GetFileName(f)}");
                 var src = await Task.Run(() => j.AddSource(f));
                 sources.Add(src);
+                SelectSource(src);           // 새로 넣은 자료를 고른다
             }
         });
         if (bad.Count > 0) MessageBox.Show(this, "그림, PDF, 한글 파일만 넣을 수 있습니다:\n" + string.Join("\n", bad.Select(Path.GetFileName)), "자료");
@@ -448,16 +538,61 @@ public partial class MainWindow : Window
 
     void SourceList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        var s = SourceList.SelectedItem as SourceFile;
-        string? img = null;
-        if (s is not null && job is not null)
+        ApplySourceFilter();
+        // 새 카드를 다 그린 뒤 맨 위로.
+        Dispatcher.BeginInvoke(CardScroll.ScrollToTop, System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>② 문항 카드를 지금 고른 자료의 문항으로 다시 그린다(원문 그림·옮긴 글을 읽음).</summary>
+    void RefreshCards()
+    {
+        cards.Clear();
+        cardsFor = activeSource;
+        if (job is null) return;
+        foreach (var q in VisibleQuestions)
         {
-            var first = s.ReadFiles.FirstOrDefault();
-            if (first is not null && Authoring.ImageExtensions.Contains(Path.GetExtension(first).ToLowerInvariant())) img = Path.Combine(job.Dir, first);
-            else if (s.Figures.Count > 0) img = Path.Combine(job.Dir, s.Figures[0]);
+            var card = new QuestionCard(q);
+            card.Load(job, claude is not null);
+            cards.Add(card);
         }
-        SourcePreview.Source = Preview.LoadImage(img);
-        PreviewBox.Visibility = SourcePreview.Source is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>[크게]: 원문을 큰 창으로.</summary>
+    void ShowOriginal_Click(object sender, RoutedEventArgs e)
+    {
+        var q = (sender as FrameworkElement)?.Tag as FoundQuestion
+                ?? ((sender as FrameworkElement)?.DataContext as QuestionCard)?.Q;
+        if (q is not null) ShowOriginal(q);
+    }
+
+    void ShowOriginal(FoundQuestion q)
+    {
+        if (job is null) return;
+        new OriginalWindow(job, q, TranscribeAsync) { Owner = this }.Show();
+    }
+
+    /// <summary>카드의 [원문 옮기기]: 그 자료 문항들의 원문을 한 번에 옮긴다.</summary>
+    async void CardTranscribe_Click(object sender, RoutedEventArgs e)
+    {
+        if (job is null || (sender as FrameworkElement)?.Tag is not FoundQuestion q
+            || job.Job.Sources.FirstOrDefault(s => s.Name == q.Source) is not { } src) return;
+        await TranscribeAsync(src);
+    }
+
+    /// <summary>원문 보기 창의 [원문 옮기기]: 그 자료 문항들의 원문을 옮긴다(문항 목록과 결과는 그대로).</summary>
+    async Task<bool> TranscribeAsync(SourceFile s)
+    {
+        if (job is null) return false;
+        var j = job;
+        int saved = 0;
+        await Run($"'{s.Name}' 문항들의 원문을 옮기는 중… (1~3분)", async ct =>
+        {
+            saved = await j.TranscribeOriginalsAsync(s, Status, ct);
+            RefreshResults();
+            RefreshCards();
+            Status(saved > 0 ? $"원문 {saved}개를 옮겼습니다. ②의 [보기]로 볼 수 있습니다." : "옮길 원문이 없었습니다.");
+        });
+        return saved > 0;
     }
 
     /// <summary>[문항 찾기]: 아직 문항을 찾지 않은 자료만 읽어 ② 표에 더한다.</summary>
@@ -503,19 +638,20 @@ public partial class MainWindow : Window
     /// 변형 수 칸(쳐 넣을 수 있는 드롭다운)에서 ↑↓: 목록이 닫혀 있으면 값을 바꾸지 않고 위·아래 문항의 변형 수 칸으로(엑셀처럼).
     /// 목록이 열려 있으면 원래대로 목록 안에서 움직인다.
     /// </summary>
-    void QuestionGrid_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    void QuestionCards_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key is not (System.Windows.Input.Key.Up or System.Windows.Input.Key.Down)) return;
         var box = FindParent<System.Windows.Controls.ComboBox>(e.OriginalSource as DependencyObject);
-        if (box is null || (string?)box.Tag != "Variants" || box.IsDropDownOpen) return;
+        if (box is null || (string?)box.Tag != "Variants" || box.IsDropDownOpen || box.DataContext is not QuestionCard card) return;
         e.Handled = true;
-        int i = questions.IndexOf((FoundQuestion)box.DataContext) + (e.Key == System.Windows.Input.Key.Down ? 1 : -1);
-        if (i < 0 || i >= questions.Count) return;
-        QuestionGrid.ScrollIntoView(questions[i]);
-        QuestionGrid.UpdateLayout();
-        if (QuestionGrid.ItemContainerGenerator.ContainerFromItem(questions[i]) is DependencyObject row
-            && FindChild<System.Windows.Controls.ComboBox>(row, c => (string?)c.Tag == "Variants") is { } next)
-            next.Focus();
+        int i = cards.IndexOf(card) + (e.Key == System.Windows.Input.Key.Down ? 1 : -1);
+        if (i < 0 || i >= cards.Count) return;
+        if (QuestionCards.ItemContainerGenerator.ContainerFromIndex(i) is FrameworkElement next
+            && FindChild<System.Windows.Controls.ComboBox>(next, c => (string?)c.Tag == "Variants") is { } nextBox)
+        {
+            next.BringIntoView();
+            nextBox.Focus();
+        }
     }
 
     /// <summary>변형 수 칸에 들어가면 숫자를 통째로 골라 둔다 — 바로 치면 바뀐다.</summary>
@@ -545,11 +681,12 @@ public partial class MainWindow : Window
 
     async void Make_Click(object sender, RoutedEventArgs e)
     {
-        if (job is null || questions.Count == 0) { Status("먼저 [문항 찾기]를 하세요."); return; }
-        var todo = questions.Where(q => q.Include && q.ExpectedCount > 0 && q.Status != "완료").ToList();
+        if (job is null || !VisibleQuestions.Any()) { Status("①에서 자료를 고르고, 먼저 [문항 찾기]를 하세요."); return; }
+        // 지금 보이는 자료(①에서 고른 것)의 문항만 만든다.
+        var todo = VisibleQuestions.Where(q => q.Include && q.ExpectedCount > 0 && q.Status != "완료").ToList();
         if (todo.Count == 0)
         {
-            Status("새로 만들 문항이 없습니다. 다시 만들려면 문항을 마우스 오른쪽 단추로 눌러 [이 문항 다시 만들기].");
+            Status("이 자료에서 새로 만들 문항이 없습니다. 다시 만들려면 문항을 마우스 오른쪽 단추로 눌러 [이 문항 다시 만들기].");
             return;
         }
         await MakeAsync(todo);
@@ -557,7 +694,7 @@ public partial class MainWindow : Window
 
     async void Remake_Click(object sender, RoutedEventArgs e)
     {
-        if (QuestionGrid.CurrentItem is not FoundQuestion q) return;
+        if (((sender as FrameworkElement)?.DataContext as QuestionCard)?.Q is not { } q) return;
         if (results.Any(r => r.Question == q && r.Destination is not null) && MessageBox.Show(this,
                 $"{q.Number}번을 다시 만들면 지금 결과의 행선지(시험지·예상문제)가 지워지고 새 결과를 다시 골라야 합니다. 계속할까요?",
                 "다시 만들기", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
@@ -567,7 +704,6 @@ public partial class MainWindow : Window
     async Task MakeAsync(List<FoundQuestion> todo)
     {
         var j = job!;
-        QuestionGrid.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Row, exitEditingMode: true);
         j.Job.Request = RequestBox.Text;
         // 다시 만드는 문항은 예전 결과의 행선지를 지운다(문항함에 자동으로 들어간 것도 정리).
         foreach (var q in todo) j.ForgetResults(q, bank, JobsDir);
@@ -614,14 +750,13 @@ public partial class MainWindow : Window
         {
             foreach (var q in questions.Where(q => q.Include))
             {
-                var items = job.LoadItems(q);
-                for (int i = 0; i < items.Count; i++)
+                foreach (var res in job.Results(q))
                 {
-                    var item = items[i];
-                    results.Add(new ResultItem(q, i, item, job.DestinationOf(q, i), OnDestinationChanged)
+                    var item = res.Item;
+                    results.Add(new ResultItem(q, res.Key, item, job.DestinationOf(res.Key), OnDestinationChanged)
                     {
-                        Title = $"{q.Number}번 · {Authoring.ResultLabel(q, i)}  [{Format.Points(item.TotalPoints)}점]",
-                        LongTitle = Authoring.ResultTitle(q, i),
+                        Title = $"{q.Number}번 · {res.Label}  [{Format.Points(item.TotalPoints)}점]",
+                        LongTitle = Authoring.ResultTitle(q, res.Label),
                         Top = Preview.Plain(item.Stem),
                         Image = item.Image is { Path.Length: > 0 } img ? Preview.LoadImage(Path.Combine(job.Dir, img.Path)) : null,
                         Bottom = Preview.Body(item),
@@ -631,13 +766,14 @@ public partial class MainWindow : Window
             }
         }
         SyncJobEntries();
+        if (IsInitialized) ApplySourceFilter();
     }
 
     /// <summary>③에서 행선지를 바꾸면: 작업에 적고(문항함 자동 정리), ④의 두 탭을 맞춘다.</summary>
     void OnDestinationChanged(ResultItem r)
     {
         if (job is null) return;
-        try { job.SetDestination(r.Question, r.Index, r.Destination, bank, JobsDir); }
+        try { job.SetDestination(r.Question, r.Key, r.Destination, bank, JobsDir); }
         catch (IOException ex) { Status("문항함에 넣지 못했습니다: " + ex.Message); }
         SyncJobEntries();
     }
@@ -646,15 +782,16 @@ public partial class MainWindow : Window
     void AllPractice_Click(object sender, RoutedEventArgs e) => SetAll(Destination.Practice);
     void AllNone_Click(object sender, RoutedEventArgs e)
     {
-        if (results.Any(r => r.Destination is not null) && MessageBox.Show(this, "③의 모든 문항을 '버림'으로 바꿀까요? ④ 두 탭에서도 빠집니다.",
+        if (VisibleResults.Any(r => r.Destination is not null) && MessageBox.Show(this, "이 자료의 결과를 모두 '버림'으로 바꿀까요? ④ 두 탭에서도 빠집니다.",
                 "모두 버림", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         SetAll(null);
     }
 
+    /// <summary>③의 '모두': 지금 보이는 자료(①에서 고른 것)의 결과만.</summary>
     void SetAll(string? dest)
     {
-        foreach (var r in results) r.Destination = dest;
-        Status(dest is null ? "모든 결과를 버림으로 바꿨습니다." : $"모든 결과를 {dest}(으)로 보냈습니다.");
+        foreach (var r in VisibleResults.ToList()) r.Destination = dest;
+        Status(dest is null ? "이 자료의 결과를 모두 버림으로 바꿨습니다." : $"이 자료의 결과를 모두 {dest}(으)로 보냈습니다.");
     }
 
     // ── ④ 시험지 / 예상문제 ───────────────────────────────
@@ -675,9 +812,7 @@ public partial class MainWindow : Window
                 else list.Add(entry);
             }
         }
-        var ex = results.Count(r => r.Destination == Destination.Exam);
-        var pr = results.Count(r => r.Destination == Destination.Practice);
-        DestSummary.Text = results.Count == 0 ? "" : $"시험지 {ex} · 예상문제 {pr} · 버림 {results.Count - ex - pr}";
+        UpdateDestSummary();
     }
 
     void Tab_Checked(object sender, RoutedEventArgs e)

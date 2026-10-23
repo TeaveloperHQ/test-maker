@@ -125,11 +125,12 @@
             </Border>
             <TextBlock Text="문항 고르기와 변형 수" Style="{StaticResource StepTitle}" />
           </StackPanel>
-          <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,12"
-                     Text="문항마다 쓸지, 원문항도 넣을지, 어떻게 몇 개 변형할지 정하세요. 변형 수는 ▾에서 고르거나 숫자를 쳐 넣고 ↑↓로 다음 문항. 다시 만들려면 마우스 오른쪽 단추." />
-          <Border DockPanel.Dock="Top" x:Name="PreviewBox" Visibility="Collapsed" Style="{StaticResource Panel}" Margin="0,0,0,12" MaxHeight="210">
-            <Image x:Name="SourcePreview" Stretch="Uniform" />
+          <Border DockPanel.Dock="Top" Background="{StaticResource GradSoft}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                  CornerRadius="8" Padding="10,5" Margin="0,0,0,8" HorizontalAlignment="Left">
+            <TextBlock x:Name="ActiveSourceText2" FontWeight="SemiBold" Foreground="{StaticResource Accent}" TextTrimming="CharacterEllipsis" />
           </Border>
+          <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,10"
+                     Text="①에서 고른 자료의 문항입니다. 문항마다 쓸지, 원문항도 넣을지, 어떻게 몇 개 변형할지 정하세요(변형 수는 ▾ 또는 숫자를 치고 ↑↓로 다음 문항). 다시 만들려면 마우스 오른쪽 단추." />
 
           <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
             <Border Style="{StaticResource Panel}">
@@ -149,91 +150,76 @@
             <Button x:Name="MakeButton" Content="변형 만들기" Style="{StaticResource Primary}" Click="Make_Click" Margin="0,12,0,0" />
           </StackPanel>
 
-          <Border BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10" Padding="1">
-            <DataGrid x:Name="QuestionGrid" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
-                      CanUserResizeRows="False" MinRowHeight="36" SelectionMode="Single" SelectionUnit="Cell"
-                      PreviewKeyDown="QuestionGrid_PreviewKeyDown">
-              <!-- 자료별로 묶어 보인다 -->
-              <DataGrid.GroupStyle>
-                <GroupStyle>
-                  <GroupStyle.HeaderTemplate>
-                    <DataTemplate>
-                      <Border Background="{StaticResource GradSoft}" Padding="10,6" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,1">
-                        <TextBlock>
-                          <Run Text="📄" /> <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource Accent}" />
-                          <Run Text="{Binding ItemCount, Mode=OneWay, StringFormat='  · 문항 {0}개'}" Foreground="{StaticResource Muted}" />
-                        </TextBlock>
-                      </Border>
-                    </DataTemplate>
-                  </GroupStyle.HeaderTemplate>
-                </GroupStyle>
-              </DataGrid.GroupStyle>
-              <DataGrid.Columns>
-                <DataGridCheckBoxColumn Header="사용" Binding="{Binding Include, UpdateSourceTrigger=PropertyChanged}" Width="40" />
-                <DataGridTextColumn Header="번호" Binding="{Binding Number}" IsReadOnly="True" Width="40" />
-                <DataGridTemplateColumn Header="내용" Width="*">
-                  <DataGridTemplateColumn.CellTemplate>
-                    <DataTemplate>
-                      <StackPanel Margin="0,6">
-                        <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" />
-                        <TextBlock Style="{StaticResource Hint}" FontSize="12">
-                          <Run Text="{Binding TypeText, Mode=OneWay}" /><Run Text="{Binding FigureText, Mode=OneWay}" />
-                        </TextBlock>
+          <!-- 문항 카드: 원문이 다 보이게 그리고, 카드마다 사용·원문항·변형 방식·변형 수 -->
+          <Grid>
+            <TextBlock x:Name="QuestionEmpty" Panel.ZIndex="1" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Hint}"
+                       TextAlignment="Center" IsHitTestVisible="False" Visibility="Collapsed" />
+            <ScrollViewer x:Name="CardScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <ItemsControl x:Name="QuestionCards" PreviewKeyDown="QuestionCards_PreviewKeyDown">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                            CornerRadius="10" Padding="14,12" Margin="0,0,4,12">
+                      <Border.ContextMenu>
+                        <ContextMenu>
+                          <MenuItem Header="이 문항 다시 만들기" Click="Remake_Click" />
+                          <MenuItem Header="크게 보기" Click="ShowOriginal_Click" />
+                        </ContextMenu>
+                      </Border.ContextMenu>
+                      <StackPanel>
+                        <!-- 머리: 번호·요약·상태 -->
+                        <DockPanel Margin="0,0,0,6">
+                          <TextBlock DockPanel.Dock="Right" Text="{Binding Q.Status}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="8,0,0,0">
+                            <TextBlock.Style>
+                              <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{StaticResource Muted}" />
+                                <Style.Triggers>
+                                  <DataTrigger Binding="{Binding Q.Status}" Value="완료"><Setter Property="Foreground" Value="#10B981" /></DataTrigger>
+                                  <DataTrigger Binding="{Binding Q.Status}" Value="만드는 중"><Setter Property="Foreground" Value="{StaticResource Accent}" /></DataTrigger>
+                                  <DataTrigger Binding="{Binding Q.Status}" Value="실패"><Setter Property="Foreground" Value="{StaticResource Danger}" /></DataTrigger>
+                                </Style.Triggers>
+                              </Style>
+                            </TextBlock.Style>
+                          </TextBlock>
+                          <Button DockPanel.Dock="Right" Content="크게" Style="{StaticResource SmallButton}" Click="ShowOriginal_Click" Tag="{Binding Q}" />
+                          <TextBlock TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                            <Run Text="{Binding Q.Number, Mode=OneWay, StringFormat='{}{0}번'}" FontWeight="Bold" Foreground="{StaticResource Accent}" />
+                            <Run Text="{Binding Q.Summary, Mode=OneWay}" Foreground="{StaticResource Text2}" />
+                          </TextBlock>
+                        </DockPanel>
+                        <!-- 정하기 -->
+                        <WrapPanel Margin="0,0,0,10">
+                          <CheckBox Content="사용" IsChecked="{Binding Q.Include}" Margin="0,0,14,4" />
+                          <CheckBox Content="원문항 넣기" IsChecked="{Binding Q.KeepOriginal}" Margin="0,0,14,4" />
+                          <TextBlock Text="변형" Style="{StaticResource Label}" Margin="0,0,6,4" />
+                          <ComboBox SelectedItem="{Binding Q.Style, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{x:Static local:Choices.Styles}"
+                                    Width="120" Padding="6,2" Margin="0,0,6,4" />
+                          <ComboBox Tag="Variants" IsEditable="True" ItemsSource="{x:Static local:Choices.Counts}"
+                                    Text="{Binding Q.Variants, UpdateSourceTrigger=PropertyChanged}" Width="56" Padding="6,2" Margin="0,0,4,4"
+                                    GotKeyboardFocus="VariantsBox_GotKeyboardFocus" ToolTip="변형 수 — 숫자를 치고 ↑↓로 다음 문항" />
+                          <TextBlock Text="개" Style="{StaticResource Label}" Margin="0,0,0,4" />
+                        </WrapPanel>
+                        <!-- 원문 그대로(자료에서 잘라 낸 그림) 또는 옮긴 글 -->
+                        <Border BorderBrush="{StaticResource Line}" BorderThickness="1" HorizontalAlignment="Left" Visibility="{Binding SnapshotVisibility}">
+                          <Image Source="{Binding Snapshot}" Stretch="Uniform" />
+                        </Border>
+                        <StackPanel Visibility="{Binding TextVisibility}">
+                          <TextBlock Text="{Binding Top}" TextWrapping="Wrap" LineHeight="21" />
+                          <Image Source="{Binding Figure}" MaxHeight="260" HorizontalAlignment="Left" Margin="0,6" />
+                          <TextBlock Text="{Binding Bottom}" TextWrapping="Wrap" LineHeight="21" />
+                        </StackPanel>
+                        <DockPanel Visibility="{Binding MissingVisibility}">
+                          <Button DockPanel.Dock="Right" Content="원문 옮기기" Style="{StaticResource SmallButton}" Click="CardTranscribe_Click" Tag="{Binding Q}"
+                                  ToolTip="이 자료 문항들의 원문을 옮깁니다(1~3분, 한 번만 — 문항 목록과 만든 결과는 그대로)." />
+                          <TextBlock Text="원문을 아직 옮기지 않은 문항입니다(예전에 찾은 문항)." Style="{StaticResource Hint}" VerticalAlignment="Center" />
+                        </DockPanel>
                       </StackPanel>
-                    </DataTemplate>
-                  </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-                <DataGridCheckBoxColumn Header="원문항" Binding="{Binding KeepOriginal, UpdateSourceTrigger=PropertyChanged}" Width="50" />
-                <DataGridTemplateColumn Header="변형 방식" Width="108">
-                  <DataGridTemplateColumn.CellTemplate>
-                    <DataTemplate>
-                      <ComboBox SelectedItem="{Binding Style, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{x:Static local:Choices.Styles}"
-                                Padding="6,2" VerticalAlignment="Center" />
-                    </DataTemplate>
-                  </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-                <!-- 드롭다운(0~10)에서 고르거나, 숫자를 쳐 넣고 ↑↓로 다음 문항으로(엑셀처럼). -->
-                <DataGridTemplateColumn Header="변형 수" Width="64">
-                  <DataGridTemplateColumn.CellTemplate>
-                    <DataTemplate>
-                      <ComboBox Tag="Variants" IsEditable="True" ItemsSource="{x:Static local:Choices.Counts}"
-                                Text="{Binding Variants, UpdateSourceTrigger=PropertyChanged}"
-                                GotKeyboardFocus="VariantsBox_GotKeyboardFocus" Padding="6,2" VerticalAlignment="Center" />
-                    </DataTemplate>
-                  </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-                <DataGridTemplateColumn Header="상태" Width="62">
-                  <DataGridTemplateColumn.CellTemplate>
-                    <DataTemplate>
-                      <TextBlock Text="{Binding Status}" FontWeight="SemiBold" VerticalAlignment="Center">
-                        <TextBlock.Style>
-                          <Style TargetType="TextBlock">
-                            <Setter Property="Foreground" Value="{StaticResource Muted}" />
-                            <Style.Triggers>
-                              <DataTrigger Binding="{Binding Status}" Value="완료">
-                                <Setter Property="Foreground" Value="#10B981" />
-                              </DataTrigger>
-                              <DataTrigger Binding="{Binding Status}" Value="만드는 중">
-                                <Setter Property="Foreground" Value="{StaticResource Accent}" />
-                              </DataTrigger>
-                              <DataTrigger Binding="{Binding Status}" Value="실패">
-                                <Setter Property="Foreground" Value="{StaticResource Danger}" />
-                              </DataTrigger>
-                            </Style.Triggers>
-                          </Style>
-                        </TextBlock.Style>
-                      </TextBlock>
-                    </DataTemplate>
-                  </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-              </DataGrid.Columns>
-              <DataGrid.ContextMenu>
-                <ContextMenu>
-                  <MenuItem Header="이 문항 다시 만들기" Click="Remake_Click" />
-                </ContextMenu>
-              </DataGrid.ContextMenu>
-            </DataGrid>
-          </Border>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Grid>
         </DockPanel>
       </Border>
 
@@ -246,6 +232,10 @@
             </Border>
             <TextBlock Text="결과 확인과 행선지" Style="{StaticResource StepTitle}" />
           </StackPanel>
+          <Border DockPanel.Dock="Top" Background="{StaticResource GradSoft}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                  CornerRadius="8" Padding="10,5" Margin="0,0,0,8" HorizontalAlignment="Left">
+            <TextBlock x:Name="ActiveSourceText3" FontWeight="SemiBold" Foreground="{StaticResource Accent}" TextTrimming="CharacterEllipsis" />
+          </Border>
           <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,8"
                      Text="문항마다 시험지·예상문제 중 어디로 보낼지 고르세요. 고르지 않은 문항은 버려집니다. 보낸 문항은 문항함에도 자동으로 모입니다." />
           <Border DockPanel.Dock="Top" Style="{StaticResource Panel}" Padding="10,6" Margin="0,0,0,10">
@@ -260,6 +250,9 @@
             </StackPanel>
           </Border>
 
+          <Grid>
+          <TextBlock x:Name="ResultEmpty" Panel.ZIndex="1" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Hint}"
+                     TextAlignment="Center" IsHitTestVisible="False" Visibility="Collapsed" />
           <ScrollViewer VerticalScrollBarVisibility="Auto">
             <ItemsControl x:Name="ResultList">
               <ItemsControl.GroupStyle>
@@ -307,6 +300,7 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
           </ScrollViewer>
+          </Grid>
         </DockPanel>
       </Border>
 

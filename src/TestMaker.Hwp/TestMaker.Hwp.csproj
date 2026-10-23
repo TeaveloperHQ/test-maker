@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- 설치된 한글(HWPFrame.HwpObject)을 COM 자동화로 구동해 문서를 만드는 부분 -->
+  <!-- 설치된 한글(HWPFrame.HwpObject)을 COM 자동화로 구동해 문서를 만드는 부분.
+       Windows 10 SDK 판: 자료 PDF 쪽을 그림으로 저장하는 데 Windows.Data.Pdf를 쓴다(PdfPages). -->
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
