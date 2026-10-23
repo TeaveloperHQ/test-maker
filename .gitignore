@@ -3,3 +3,31 @@ obj/
 .vs/
 *.user
 TestResults/
+
+# ── 선생님 자료·시험 문항은 절대 저장소에 넣지 않는다 ──
+# 작업·문항함·양식은 문서\TestMaker(저장소 밖)에 생기지만, 실수로 저장소 안에 생겨도 올라가지 않게 막는다.
+job.json
+found.json
+originals_new.json
+시험.json
+**/sources/
+**/items/
+**/originals/
+**/figures/
+**/작업/
+**/문항함/
+**/양식/
+**/시험지/
+# 한글·PDF·그림은 아래 허용 목록(앱이 만든 표준 양식, 아이콘, 가상 테스트 파일)만
+*.hwp
+*.hwpx
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.gif
+!forms/default/base.hwpx
+!forms/표준 시험지 양식(B4).hwp
+!assets/icon-*.png
+!tests/TestMaker.Tests/Fixtures/school_exam.hwpx
