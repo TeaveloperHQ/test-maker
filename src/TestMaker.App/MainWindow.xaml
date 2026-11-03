@@ -317,6 +317,8 @@
           <TextBlock x:Name="TabHint" DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,10" />
           <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
             <Button DockPanel.Dock="Right" Content="비우기" Click="ClearExam_Click" Margin="6,0,0,0" />
+            <Button DockPanel.Dock="Right" Content="⛶ 전체 화면" Click="EditFullScreen_Click" Margin="6,0,0,0"
+                    ToolTip="문항 전체를 크게 보며 순서를 정합니다(끌어 옮기기·번호로 옮기기·단원별로 모으기). 문항을 두 번 눌러도 열립니다." />
             <Button Content="문항함에서 넣기…" Click="AddFromBank_Click" Margin="0" />
           </DockPanel>
 
@@ -356,10 +358,31 @@
                     ToolTip="이 작업에서 만든 시험지·예상문제지(날짜별)를 엽니다." />
           </StackPanel>
 
+          <!-- ④에서 뺀 문항: 다시 예상문제·시험지로 -->
+          <Expander x:Name="RemovedBox" DockPanel.Dock="Bottom" Header="뺀 문항" Margin="0,8,0,0" Visibility="Collapsed"
+                    Foreground="{StaticResource Text2}" FontWeight="SemiBold">
+            <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
+              <ItemsControl x:Name="RemovedList" FontWeight="Normal">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <DockPanel Margin="4,2">
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Content="예상문제로" Style="{StaticResource SmallButton}" Click="RemovedToPractice_Click" Tag="{Binding}" />
+                        <Button Content="시험지로" Style="{StaticResource SmallButton}" Click="RemovedToExam_Click" Tag="{Binding}" />
+                      </StackPanel>
+                      <TextBlock Text="{Binding ShownTitle}" FontSize="12.5" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"
+                                 VerticalAlignment="Center" ToolTip="{Binding Detail}" />
+                    </DockPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Expander>
+
           <Border BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10">
             <Grid>
               <ListBox x:Name="ExamList" BorderThickness="0" Background="Transparent" HorizontalContentAlignment="Stretch"
-                       ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled" MouseDoubleClick="ExamList_MouseDoubleClick">
                 <ListBox.ItemContainerStyle>
                   <Style TargetType="ListBoxItem">
                     <Setter Property="Template">
@@ -387,9 +410,11 @@
                         <Button Content="↓" Style="{StaticResource SmallButton}" Click="EntryDown_Click" Tag="{Binding}" ToolTip="뒤로" />
                         <Button Content="✕" Style="{StaticResource SmallButton}" Click="EntryRemove_Click" Tag="{Binding}" ToolTip="빼기(이번 작업 문항은 ③에서 '버림'이 됩니다)" />
                       </StackPanel>
-                      <StackPanel>
-                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding Sub}" Style="{StaticResource Hint}" FontSize="11.5" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                      <StackPanel Background="Transparent">
+                        <TextBlock Text="{Binding ShownTitle}" TextWrapping="Wrap" MaxHeight="40" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Unit}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource PracticeColor}"
+                                   TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                        <TextBlock Text="{Binding Meta}" Style="{StaticResource Hint}" FontSize="11.5" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                       </StackPanel>
                     </DockPanel>
                   </DataTemplate>

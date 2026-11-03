@@ -1,0 +1,168 @@
+<Window x:Class="TestMaker.App.ExamEditWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="④ 문항 배치 — 전체 화면" Width="1400" Height="900" MinWidth="900" MinHeight="500" WindowState="Maximized"
+        FontFamily="{StaticResource UiFont}" FontSize="14" Background="{StaticResource Bg}" Foreground="{StaticResource Text}"
+        Icon="/icon.ico" WindowStartupLocation="CenterOwner" UseLayoutRounding="True">
+  <DockPanel Margin="20">
+    <!-- 위: 탭·요약·도구 -->
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+      <Button DockPanel.Dock="Right" Content="닫기" IsCancel="True" Click="Close_Click" Margin="0" Padding="18,7" />
+      <Button DockPanel.Dock="Right" Content="단원별로 모으기" Click="GroupByUnit_Click" Margin="0,0,8,0"
+              ToolTip="같은 단원의 문항을 한데 모읍니다. 단원 사이의 순서와 단원 안의 순서는 지금 그대로입니다." />
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <Border Style="{StaticResource StepBadge}">
+          <TextBlock Text="4" Foreground="White" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <RadioButton x:Name="ExamTab" Style="{StaticResource Pill}" GroupName="edittab" Checked="Tab_Checked" Content="시험지" />
+        <RadioButton x:Name="PracticeTab" Style="{StaticResource Pill}" GroupName="edittab" Checked="Tab_Checked" Content="예상문제" />
+        <TextBlock x:Name="SummaryText" Foreground="{StaticResource Text2}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="12,0,0,0" />
+      </StackPanel>
+    </DockPanel>
+
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="360" />
+        <ColumnDefinition Width="16" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+      <!-- 왼쪽: 순서(끌어서 옮기기) -->
+      <Border Style="{StaticResource Card}" Padding="12">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Top" Text="순서" Style="{StaticResource StepTitle}" Margin="4,0,0,2" />
+          <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="4,0,0,10"
+                     Text="끌어서 옮기거나 Alt+↑↓로 옮기세요. 누르면 오른쪽에 그 문항이 보입니다." />
+          <!-- 뺀 문항: 다시 예상문제·시험지로 -->
+          <Border x:Name="RemovedBox" DockPanel.Dock="Bottom" Style="{StaticResource Panel}" Margin="0,10,0,0" Padding="10,8" Visibility="Collapsed">
+            <DockPanel>
+              <TextBlock x:Name="RemovedHeader" DockPanel.Dock="Top" FontWeight="SemiBold" Foreground="{StaticResource Text2}" Margin="0,0,0,4" />
+              <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="RemovedList">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <DockPanel Margin="0,3">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                          <Button Content="예상문제로" Style="{StaticResource SmallButton}" Click="RemovedToPractice_Click" Tag="{Binding}" />
+                          <Button Content="시험지로" Style="{StaticResource SmallButton}" Click="RemovedToExam_Click" Tag="{Binding}" />
+                        </StackPanel>
+                        <StackPanel>
+                          <TextBlock Text="{Binding Unit}" FontSize="11.5" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Text="{Binding ShownTitle}" FontSize="12.5" TextTrimming="CharacterEllipsis" ToolTip="{Binding Top}" />
+                        </StackPanel>
+                      </DockPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </DockPanel>
+          </Border>
+          <Grid>
+            <ListBox x:Name="OrderList" Style="{StaticResource SoftList}" AllowDrop="True" HorizontalContentAlignment="Stretch"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     SelectionChanged="OrderList_SelectionChanged" PreviewKeyDown="OrderList_PreviewKeyDown"
+                     PreviewMouseLeftButtonDown="OrderList_PreviewMouseLeftButtonDown" PreviewMouseMove="OrderList_PreviewMouseMove"
+                     DragOver="OrderList_DragOver" Drop="OrderList_Drop">
+              <!-- 지금 보는 문항: 연보라 바탕 + 왼쪽 강조 막대(흰 카드 위에서도 보이게) -->
+              <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                  <Setter Property="Template">
+                    <Setter.Value>
+                      <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="b" Background="Transparent" BorderBrush="Transparent" BorderThickness="3,0,0,0"
+                                CornerRadius="6" Padding="8,6" Margin="0,0,0,2">
+                          <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                          <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{StaticResource SoftBg}" />
+                          </Trigger>
+                          <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{StaticResource AccentSoft}" />
+                            <Setter TargetName="b" Property="BorderBrush" Value="{StaticResource Accent}" />
+                          </Trigger>
+                        </ControlTemplate.Triggers>
+                      </ControlTemplate>
+                    </Setter.Value>
+                  </Setter>
+                </Style>
+              </ListBox.ItemContainerStyle>
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <DockPanel>
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding Number}" FontWeight="Bold" Foreground="{StaticResource Accent}" Width="28" />
+                    <StackPanel>
+                      <TextBlock Text="{Binding Unit}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource PracticeColor}"
+                                 TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding ShownTitle}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                  </DockPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock x:Name="EmptyText" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Hint}"
+                       Text="아직 넣은 문항이 없습니다." />
+          </Grid>
+        </DockPanel>
+      </Border>
+
+      <!-- 오른쪽: 문항 전체(글·그림·선택지·정답)와 편집 단추 -->
+      <ListBox x:Name="CardList" Grid.Column="2" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled" VirtualizingPanel.ScrollUnit="Pixel"
+               SelectionChanged="CardList_SelectionChanged" ScrollViewer.ScrollChanged="CardList_ScrollChanged">
+        <ListBox.ItemContainerStyle>
+          <Style TargetType="ListBoxItem">
+            <Setter Property="Template">
+              <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                  <Border x:Name="card" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                          CornerRadius="14" Padding="20,16" Margin="0,0,8,12">
+                    <ContentPresenter />
+                  </Border>
+                  <ControlTemplate.Triggers>
+                    <Trigger Property="IsSelected" Value="True">
+                      <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource Accent}" />
+                      <Setter TargetName="card" Property="BorderThickness" Value="2" />
+                    </Trigger>
+                  </ControlTemplate.Triggers>
+                </ControlTemplate>
+              </Setter.Value>
+            </Setter>
+          </Style>
+        </ListBox.ItemContainerStyle>
+        <ListBox.ItemTemplate>
+          <DataTemplate>
+            <StackPanel>
+              <DockPanel Margin="0,0,0,10">
+                <TextBox DockPanel.Dock="Left" Text="{Binding Number, Mode=OneWay}" Width="58" Padding="2,3" FontWeight="Bold" FontSize="16"
+                         Foreground="{StaticResource Accent}" HorizontalContentAlignment="Center" Margin="0,0,12,0" VerticalAlignment="Top"
+                         KeyDown="NumberBox_KeyDown" LostKeyboardFocus="NumberBox_LostKeyboardFocus"
+                         ToolTip="번호를 바꾸고 Enter — 그 자리로 옮깁니다." />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                  <Button Content="맨 앞" Style="{StaticResource SmallButton}" Click="First_Click" Tag="{Binding}" />
+                  <Button Content="↑" Style="{StaticResource SmallButton}" Click="Up_Click" Tag="{Binding}" ToolTip="앞으로" />
+                  <Button Content="↓" Style="{StaticResource SmallButton}" Click="Down_Click" Tag="{Binding}" ToolTip="뒤로" />
+                  <Button Content="맨 뒤" Style="{StaticResource SmallButton}" Click="Last_Click" Tag="{Binding}" />
+                  <Button x:Name="SendButton" Style="{StaticResource SmallButton}" Click="Send_Click" Tag="{Binding}" Margin="10,0,0,0"
+                          Loaded="SendButton_Loaded" />
+                  <Button Content="빼기" Style="{StaticResource SmallButton}" Click="Remove_Click" Tag="{Binding}" Foreground="{StaticResource Danger}"
+                          ToolTip="빼기(이번 작업 문항은 ③에서 '버림'이 됩니다)" />
+                </StackPanel>
+                <StackPanel>
+                  <TextBlock Text="{Binding ShownTitle}" FontWeight="SemiBold" FontSize="15" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Detail}" Style="{StaticResource Hint}" Margin="0,2,0,0" />
+                </StackPanel>
+              </DockPanel>
+              <TextBlock Text="{Binding Top}" TextWrapping="Wrap" LineHeight="24" FontSize="15" />
+              <Image Source="{Binding Image}" MaxWidth="560" MaxHeight="380" HorizontalAlignment="Left" Margin="0,8" />
+              <TextBlock Text="{Binding Body}" TextWrapping="Wrap" LineHeight="24" FontSize="15" />
+              <Border Background="{StaticResource AccentSoft}" CornerRadius="8" Padding="12,8" Margin="0,12,0,0">
+                <TextBlock Text="{Binding Answer}" TextWrapping="Wrap" FontSize="13" LineHeight="20" Foreground="{StaticResource Text2}" />
+              </Border>
+            </StackPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </Grid>
+  </DockPanel>
+</Window>

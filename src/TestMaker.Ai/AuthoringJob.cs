@@ -55,6 +55,8 @@ public sealed class AuthoringJob
     public List<ExamListEntry> ExamList { get; set; } = [];
     /// <summary>④ 예상문제 탭의 문항과 순서.</summary>
     public List<ExamListEntry> PracticeList { get; set; } = [];
+    /// <summary>④에서 뺀 문항(최근 것이 앞). 다시 예상문제·시험지로 보낼 수 있게 남겨 둔다.</summary>
+    public List<ExamListEntry> RemovedList { get; set; } = [];
     /// <summary>예상문제지 제목(비어 있으면 "작업 이름 예상문제").</summary>
     public string PracticeTitle { get; set; } = "";
     public bool Pdf { get; set; } = true;

@@ -84,11 +84,18 @@ public sealed class ResultItem(FoundQuestion question, string key, Question item
 }
 
 /// <summary>④ 목록의 문항 하나(이번 작업의 결과이거나 문항함의 문항).</summary>
-public sealed class ExamEntry(string key, string title, string sub, Question question, bool fromJob) : Observable
+public sealed class ExamEntry(string key, string title, string origin, Question question, bool fromJob) : Observable
 {
     public string Key { get; } = key;
     public string Title { get; } = title;
-    public string Sub { get; } = sub;
+    /// <summary>
+    /// ④에 보이는 이름. 이번 작업 문항의 "7번 변형 3"은 자료의 문항 번호라 ④의 번호(순서)와 헷갈리므로 "원문 7번 변형 3"으로.
+    /// </summary>
+    public string ShownTitle => FromJob
+        ? System.Text.RegularExpressions.Regex.Replace(Title, @"^0*(\d+)번", m => $"원문 {m.Groups[1].Value}번")
+        : Title;
+    /// <summary>어디서 왔는지(예: "이번 작업 · 자료 이름", "문항함 · 시험용").</summary>
+    public string Origin { get; } = origin;
     /// <summary>그림 경로를 절대 경로로 바꾼 사본.</summary>
     public Question Question { get; } = question;
     public bool FromJob { get; } = fromJob;
@@ -97,6 +104,36 @@ public sealed class ExamEntry(string key, string title, string sub, Question que
 
     int number;
     public int Number { get => number; set => Set(ref number, value); }
+
+    // ── 목록 둘째 줄과 전체 화면 편집의 자세한 정보(배운 순서대로 놓기 쉽게 단원을 앞에) ──
+    public string Unit => string.IsNullOrWhiteSpace(Question.Meta.Unit) ? "단원 없음" : Question.Meta.Unit!;
+    public string Sub => $"{Unit} · {Format.Points(Question.TotalPoints)}점 · {Origin}";
+    /// <summary>목록 셋째 줄: 배점·난이도·어디서.</summary>
+    public string Meta => string.Join(" · ", new[]
+    {
+        $"{Format.Points(Question.TotalPoints)}점", Question.Meta.Difficulty is { Length: > 0 } d ? $"난이도 {d}" : null, Origin,
+    }.Where(s => s is not null));
+    public string Detail => string.Join(" · ", new[]
+    {
+        Question.Meta.Unit, Question.Meta.Difficulty is { Length: > 0 } d ? $"난이도 {d}" : null,
+        $"{Format.Points(Question.TotalPoints)}점", Origin,
+    }.Where(s => !string.IsNullOrWhiteSpace(s)));
+    public string Top => Preview.Plain(Question.Stem);
+    public string Body => Preview.Body(Question);
+    public string Answer => Preview.Answer(Question);
+
+    ImageSource? image;
+    bool imageLoaded;
+    /// <summary>문항 그림(전체 화면 편집에서 처음 보일 때 읽는다).</summary>
+    public ImageSource? Image
+    {
+        get
+        {
+            if (!imageLoaded && Question.Image is { Path.Length: > 0 } img) image = Preview.LoadImage(img.Path, decodeWidth: 700);
+            imageLoaded = true;
+            return image;
+        }
+    }
 }
 
 public partial class MainWindow : Window
@@ -117,6 +154,8 @@ public partial class MainWindow : Window
     readonly ObservableCollection<ResultItem> results = [];
     /// <summary>④ 시험지 탭 / 예상문제 탭.</summary>
     readonly ObservableCollection<ExamEntry> examEntries = [], practiceEntries = [];
+    /// <summary>④에서 뺀 문항(이번에 연 동안). [예상문제로]/[시험지로]로 다시 보낼 수 있다.</summary>
+    readonly ObservableCollection<ExamEntry> removedEntries = [];
     readonly QuestionBank bank = new(BankDir);
     readonly ClaudeCode? claude;
     Authoring? job;
@@ -151,6 +190,13 @@ public partial class MainWindow : Window
         sources.CollectionChanged += (_, _) => DropHint.Visibility = sources.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         examEntries.CollectionChanged += (_, _) => { Renumber(); SaveLists(); };
         practiceEntries.CollectionChanged += (_, _) => { Renumber(); SaveLists(); };
+        RemovedList.ItemsSource = removedEntries;
+        removedEntries.CollectionChanged += (_, _) =>
+        {
+            RemovedBox.Visibility = removedEntries.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            RemovedBox.Header = $"뺀 문항 {removedEntries.Count}";
+            SaveLists();
+        };
         LoadForms();
         ShowTab();
 
@@ -180,6 +226,20 @@ public partial class MainWindow : Window
                     await Task.Delay(1000);
                 }
                 Snapshot(this, snap);
+                // TESTMAKER_SNAPSHOT_EDIT=파일.png 이면 ④ 전체 화면 편집 창도 찍는다(최대화하지 않은 1400×900).
+                if (Environment.GetEnvironmentVariable("TESTMAKER_SNAPSHOT_EDIT") is { Length: > 0 } editSnap)
+                {
+                    var w = OpenEditor(null, modal: false);
+                    w.WindowState = WindowState.Normal;
+                    await Task.Delay(1500);
+                    // TESTMAKER_SNAPSHOT_EDIT_SCROLL=n 이면 오른쪽 문항을 아래로 n번 굴린 뒤 찍는다.
+                    if (int.TryParse(Environment.GetEnvironmentVariable("TESTMAKER_SNAPSHOT_EDIT_SCROLL"), out var rolls)
+                        && FindChild<System.Windows.Controls.ScrollViewer>(w.CardList, _ => true) is { } sv)
+                        for (int k = 0; k < rolls; k++) { sv.LineDown(); sv.LineDown(); sv.LineDown(); await Task.Delay(60); }
+                    await Task.Delay(800);
+                    Snapshot(w, editSnap);
+                    w.Close();
+                }
                 // TESTMAKER_SNAPSHOT_ORIGINAL=파일.png 이면 ② 첫 문항의 원문 보기 창도 찍는다.
                 if (Environment.GetEnvironmentVariable("TESTMAKER_SNAPSHOT_ORIGINAL") is { Length: > 0 } oSnap && job is not null && cards.Count > 0)
                 {
@@ -269,7 +329,7 @@ public partial class MainWindow : Window
         loading = true;
         try
         {
-            sources.Clear(); questions.Clear(); results.Clear(); examEntries.Clear(); practiceEntries.Clear();
+            sources.Clear(); questions.Clear(); results.Clear(); examEntries.Clear(); practiceEntries.Clear(); removedEntries.Clear();
             JobNameText.Text = job?.Name ?? "작업 없음";
             JobText.Text = job is null ? "[새 작업…]으로 시작하세요." : $"작업 폴더: {job.Dir}";
             if (job is null) return;
@@ -285,6 +345,7 @@ public partial class MainWindow : Window
             RefreshResults();
             RestoreList(examEntries, job.Job.ExamList);
             RestoreList(practiceEntries, job.Job.PracticeList);
+            RestoreRemoved(job.Job.RemovedList);
             ExamTab.IsChecked = true;
         }
         finally { loading = false; }
@@ -363,6 +424,24 @@ public partial class MainWindow : Window
         if (missing > 0) Status($"④에 넣어 두었던 문항함 문항 {missing}개를 찾지 못했습니다(문항함에서 지워졌을 수 있음).");
     }
 
+    /// <summary>'뺀 문항'을 되살린다. 그사이 ③에서 다시 보냈거나 없어진 문항은 뺀다.</summary>
+    void RestoreRemoved(List<ExamListEntry> saved)
+    {
+        var placed = examEntries.Concat(practiceEntries).Select(x => x.Key).ToHashSet();
+        foreach (var s in saved.Where(s => !placed.Contains(s.Key)))
+        {
+            if (s.Key.StartsWith("bank:"))
+            {
+                if (s.BankDir is not null && QuestionBank.LoadItem(s.BankDir) is { } item) removedEntries.Add(BankEntryOf(item));
+            }
+            else if (results.FirstOrDefault(r => "job:" + r.Key == s.Key && r.Destination is null) is { } r)
+                removedEntries.Add(JobEntryOf(r));
+        }
+    }
+
+    ExamEntry JobEntryOf(ResultItem r) =>
+        new("job:" + r.Key, r.LongTitle, $"이번 작업 · {r.Source}", QuestionBank.Absolutize(r.Item, job!.Dir), fromJob: true);
+
     static ExamEntry BankEntryOf(BankItem item) =>
         new("bank:" + item.Id, item.Title, $"문항함 · {item.CategoryText}", QuestionBank.Absolutize(item.Question, item.Dir), fromJob: false)
         { BankDir = item.Dir };
@@ -373,6 +452,7 @@ public partial class MainWindow : Window
         static List<ExamListEntry> Of(IEnumerable<ExamEntry> l) => l.Select(e => new ExamListEntry { Key = e.Key, BankDir = e.BankDir }).ToList();
         job.Job.ExamList = Of(examEntries);
         job.Job.PracticeList = Of(practiceEntries);
+        job.Job.RemovedList = Of(removedEntries);
         job.Save();
     }
 
@@ -806,12 +886,15 @@ public partial class MainWindow : Window
             foreach (var stale in list.Where(e => e.FromJob && !keys.Contains(e.Key)).ToList()) list.Remove(stale);
             foreach (var r in wanted)
             {
-                var entry = new ExamEntry("job:" + r.Key, r.LongTitle, $"이번 작업 · {r.Source}", QuestionBank.Absolutize(r.Item, job!.Dir), fromJob: true);
+                var entry = JobEntryOf(r);
                 var i = list.ToList().FindIndex(e => e.Key == entry.Key);
                 if (i >= 0) list[i] = entry;          // 다시 만든 문항이면 새 것으로
                 else list.Add(entry);
             }
         }
+        // ③에서 다시 고른 문항은 '뺀 문항'에서 내린다.
+        var placed = examEntries.Concat(practiceEntries).Select(x => x.Key).ToHashSet();
+        foreach (var back in removedEntries.Where(x => placed.Contains(x.Key)).ToList()) removedEntries.Remove(back);
         UpdateDestSummary();
     }
 
@@ -896,10 +979,55 @@ public partial class MainWindow : Window
 
     void EntryRemove_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is not ExamEntry entry) return;
-        // 이번 작업의 문항은 ③에서 '버림'으로 바꾸는 것과 같다(다시 고르면 돌아온다).
-        if (entry.FromJob && results.FirstOrDefault(r => "job:" + r.Key == entry.Key) is { } r) r.Destination = null;
-        else Current.Remove(entry);
+        if ((sender as FrameworkElement)?.Tag is ExamEntry entry) SendEntry(entry, null);
+    }
+
+    /// <summary>
+    /// ④ 문항을 다른 탭(행선지)으로 보내거나 뺀다(null). 이번 작업의 문항은 ③의 행선지를 바꾸는 것과 같다(문항함도 따라 정리).
+    /// 뺀 문항은 '뺀 문항'에 남아 다시 보낼 수 있다.
+    /// </summary>
+    void SendEntry(ExamEntry entry, string? dest)
+    {
+        if (dest is null)
+        {
+            if (!removedEntries.Any(x => x.Key == entry.Key)) removedEntries.Insert(0, entry);
+        }
+        else foreach (var stale in removedEntries.Where(x => x.Key == entry.Key).ToList()) removedEntries.Remove(stale);
+
+        if (entry.FromJob && results.FirstOrDefault(r => "job:" + r.Key == entry.Key) is { } r) { r.Destination = dest; return; }
+        foreach (var list in new[] { examEntries, practiceEntries })
+            if (list.FirstOrDefault(x => x.Key == entry.Key) is { } there) list.Remove(there);
+        if (dest is not null) (dest == Destination.Practice ? practiceEntries : examEntries).Add(entry);
+    }
+
+    void RemovedToPractice_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is ExamEntry entry) { SendEntry(entry, Destination.Practice); Status("뺀 문항을 ④ 예상문제에 넣었습니다."); }
+    }
+
+    void RemovedToExam_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is ExamEntry entry) { SendEntry(entry, Destination.Exam); Status("뺀 문항을 ④ 시험지에 넣었습니다."); }
+    }
+
+    void EditFullScreen_Click(object sender, RoutedEventArgs e) => OpenEditor(ExamList.SelectedItem as ExamEntry);
+
+    void ExamList_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        // ↑↓✕를 빨리 누른 것은 두 번 누르기로 치지 않는다.
+        for (var d = e.OriginalSource as DependencyObject; d is not null && d != ExamList; d = VisualTreeHelper.GetParent(d))
+            if (d is System.Windows.Controls.Button) return;
+        if (ExamList.SelectedItem is ExamEntry entry) OpenEditor(entry);
+    }
+
+    /// <summary>④ 전체 화면 편집. 닫으면 거기서 보던 탭을 그대로 보인다.</summary>
+    ExamEditWindow OpenEditor(ExamEntry? focus, bool modal = true)
+    {
+        var w = new ExamEditWindow(examEntries, practiceEntries, removedEntries, PracticeShown, SendEntry, focus) { Owner = this };
+        if (!modal) { w.Show(); return w; }
+        w.ShowDialog();
+        (w.PracticeShown ? PracticeTab : ExamTab).IsChecked = true;
+        return w;
     }
 
     void ClearExam_Click(object sender, RoutedEventArgs e)
@@ -908,8 +1036,7 @@ public partial class MainWindow : Window
         if (list.Count == 0) return;
         if (MessageBox.Show(this, $"④ {CurrentDestination} 목록을 비울까요? 이번 작업의 문항은 ③에서 '버림'이 됩니다.", "비우기",
                 MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
-        foreach (var r in results.Where(r => r.Destination == CurrentDestination).ToList()) r.Destination = null;
-        list.Clear();
+        foreach (var x in list.ToList()) SendEntry(x, null);
     }
 
     async void Render_Click(object sender, RoutedEventArgs e)
